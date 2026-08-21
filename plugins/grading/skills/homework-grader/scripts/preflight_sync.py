@@ -103,8 +103,13 @@ def check(path, do_pull):
     # Uncommitted work blocks everything -- never pull over it.
     _, porcelain, _ = git(path, "status", "--porcelain")
     if porcelain:
-        files = [ln[3:] for ln in porcelain.splitlines()]
-        return {"state": DIRTY, "detail": f"{len(files)} uncommitted", "files": files[:10]}
+        # Split off the two-column status code rather than slicing a fixed
+        # offset: git() strips stdout, so the first line has already lost its
+        # leading space. maxsplit=1 keeps filenames containing spaces intact.
+        files = [ln.strip().split(maxsplit=1)[-1] for ln in porcelain.splitlines()]
+        more = f" (showing 10)" if len(files) > 10 else ""
+        return {"state": DIRTY, "detail": f"{len(files)} uncommitted{more}",
+                "files": files[:10]}
 
     code, branch, _ = git(path, "rev-parse", "--abbrev-ref", "HEAD")
     code, upstream, _ = git(path, "rev-parse", "--abbrev-ref", "@{upstream}")
