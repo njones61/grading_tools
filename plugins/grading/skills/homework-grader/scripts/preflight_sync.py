@@ -19,6 +19,7 @@ Exit codes:
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -29,6 +30,16 @@ OK, BEHIND, AHEAD, DIVERGED, DIRTY, NO_UPSTREAM, ERROR = (
 
 # States a human has to resolve; --pull cannot fix these.
 BLOCKING = {AHEAD, DIVERGED, DIRTY, ERROR}
+
+# Editor and OS droppings. Changes to these cannot make a rubric or key stale,
+# so they are reported but do not block grading -- a check that fires on
+# .DS_Store every time is a check people learn to ignore.
+CRUFT = re.compile(
+    r"(^|/)(\.DS_Store|Thumbs\.db|Icon\r?|desktop\.ini)$"
+    r"|(^|/)__pycache__/|\.pyc$"
+    r"|(^|/)\.idea/|(^|/)\.vscode/"
+    r"|(^|/)~\$|(^|/)\.~lock\.|(^|/)\._"
+)
 
 
 def git(repo, *args):
@@ -102,25 +113,30 @@ def check(path, do_pull):
 
     # Uncommitted work blocks everything -- never pull over it.
     _, porcelain, _ = git(path, "status", "--porcelain")
+    cruft = []
     if porcelain:
         # Split off the two-column status code rather than slicing a fixed
         # offset: git() strips stdout, so the first line has already lost its
         # leading space. maxsplit=1 keeps filenames containing spaces intact.
         files = [ln.strip().split(maxsplit=1)[-1] for ln in porcelain.splitlines()]
-        more = f" (showing 10)" if len(files) > 10 else ""
-        return {"state": DIRTY, "detail": f"{len(files)} uncommitted{more}",
-                "files": files[:10]}
+        cruft = [f for f in files if CRUFT.search(f)]
+        real = [f for f in files if not CRUFT.search(f)]
+        if real:
+            more = " (showing 10)" if len(real) > 10 else ""
+            return {"state": DIRTY, "detail": f"{len(real)} uncommitted{more}",
+                    "files": real[:10], "cruft": len(cruft)}
 
     code, branch, _ = git(path, "rev-parse", "--abbrev-ref", "HEAD")
     code, upstream, _ = git(path, "rev-parse", "--abbrev-ref", "@{upstream}")
     if code != 0:
-        return {"state": NO_UPSTREAM, "branch": branch,
+        return {"state": NO_UPSTREAM, "branch": branch, "cruft": len(cruft),
                 "detail": f"branch '{branch}' tracks nothing"}
 
     _, counts, _ = git(path, "rev-list", "--left-right", "--count", "@{upstream}...HEAD")
     behind, ahead = (int(n) for n in counts.split())
 
-    result = {"branch": branch, "upstream": upstream, "behind": behind, "ahead": ahead}
+    result = {"branch": branch, "upstream": upstream, "behind": behind,
+              "ahead": ahead, "cruft": len(cruft)}
 
     if behind and ahead:
         return {**result, "state": DIVERGED,
@@ -199,6 +215,8 @@ def main():
         print(f"  {'':<12} {'':<11} {r['path']}")
         for f in r.get("files", []):
             print(f"  {'':<12} {'':<11}   {f}")
+        if r.get("cruft"):
+            print(f"  {'':<12} {'':<11} ({r['cruft']} ignored: .DS_Store, __pycache__, editor files)")
         if r["state"] in ADVICE:
             print(f"  {'':<12} {'':<11} -> {ADVICE[r['state']]}")
         print()
