@@ -1,0 +1,20 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "grading_tools",
+  "description": "Teaching and grading tools for BYU civil engineering courses",
+  "owner": {
+    "name": "Norm Jones",
+    "email": "njones61@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "grading",
+      "description": "Grade student homework submissions against answer keys, producing per-student feedback documents and a class score summary. Reads the assignment and rubric from the course content repo and the answer key from the private instructor repo.",
+      "author": {
+        "name": "Norm Jones"
+      },
+      "category": "productivity",
+      "source": "./plugins/grading"
+    }
+  ]
+}

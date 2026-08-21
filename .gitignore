@@ -1,0 +1,11 @@
+# Never commit a crosswalk -- it maps codes back to real students.
+roster.json
+
+.DS_Store
+._*
+Icon?
+Thumbs.db
+__pycache__/
+*.pyc
+.idea/
+.vscode/
