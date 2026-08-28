@@ -229,8 +229,22 @@ If a numerical answer is very close to correct (minor roundoff), note it but giv
 ### Don't Cascade Penalties
 Critical: if an early error flows into later calculations, deduct only for the original mistake. If the downstream work is done correctly with the wrong input, don't deduct again — note that the answer is wrong because of the earlier error, but award credit for correct methodology. Cascading deductions mean one small slip costs most of the points, which misrepresents what the student actually understands.
 
+### Score Missing Work Once
+A rubric item that was not attempted scores zero, and the omission stops there.
+
+A separate "documentation" or "presentation" item measures how clearly the student presented the work they *did* attempt — not how much of the assignment they finished. Completeness is already measured by the per-part items, so deducting for it again under documentation counts the same omission twice.
+
+Judge documentation on what is in front of you. A student who answered four of six parts and documented those four well earns full documentation credit.
+
 ### Give Partial Credit for Effort
 Wrong answer but clear, genuine effort — right approach, work shown, an error somewhere — earns partial credit. Never zero for real effort. Be judicious: partial credit should track how close they came to demonstrating understanding.
+
+### Grade the Final Attempt
+Students sometimes leave a false start in the submission — a scratch attempt, a duplicate table, a note like "I think I did this wrong, retry =>". Grade the attempt the student presents as final and ignore the abandoned one.
+
+Do not deduct for its presence. Showing the thought process is not a defect, and penalizing it teaches students to strip their reasoning out before submitting, which makes work harder to grade and harder to give partial credit on.
+
+If which attempt is final is genuinely ambiguous, grade the one that scores highest and say in the feedback which one you graded.
 
 ### Teach in Your Feedback
 Don't just say "wrong." Every deduction must include all three of:
@@ -241,11 +255,24 @@ Don't just say "wrong." Every deduction must include all three of:
 
 A good feedback item reads like a mini-explanation a TA would give in office hours. A bad one reads like an automated "points deducted" notice. When in doubt, be more specific — students can skip details they already know, but they can't learn from feedback that doesn't say what went wrong.
 
+### A Name on the Page Is Not a Deduction
+Assignments often ask students to leave their name off the work so it can be graded anonymously. When a student does it anyway — usually on a scan, where the redaction band missed it — note the request in the feedback and move on. Do not deduct.
+
+The instruction exists to protect the student, not to create an obligation they can fail. Penalizing it turns a courtesy into a trap, and the points would have to come out of a rubric item that is measuring something else.
+
+Keep grading against the code. Never write the name you saw into the feedback document, your working notes, or `scores.xlsx` — Phase 5 restores identities from the crosswalk, and a name typed in by hand survives de-identification without being tracked.
+
 ### Account for Variable Inputs
 Always read the student's actual inputs and compute expected outputs from those. Never penalize a student for choosing a different dropdown option than the key shows.
 
 ### Check Formula Structure, Not Just Values
 For spreadsheets, verify students used the functions the assignment required (VLOOKUP, MATCH, IF). A hardcoded correct number doesn't demonstrate understanding.
+
+A value matching the key is not by itself evidence of understanding. When work reaches the right number through demonstrably wrong reasoning — a reference to the wrong cell, a constant that happens to coincide, a cancellation that only holds for this problem's inputs — take a **partial** deduction and show the student why it is a coincidence. Name the input that would have to change for the answer to break; that is what makes the feedback teach rather than nitpick.
+
+Partial, on both sides. Full credit teaches that the displayed number is all that matters. A full deduction ignores that the surrounding work may be sound, and the rest of the problem still earns its points.
+
+Be sure the reasoning is actually wrong rather than merely different. A valid alternative route to the same answer earns full credit — students decompose problems differently, and an unfamiliar but correct derivation is not an error.
 
 ---
 
