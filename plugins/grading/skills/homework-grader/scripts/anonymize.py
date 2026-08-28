@@ -403,6 +403,19 @@ def unmask(args):
         except Exception as exc:
             print(f"warning: could not rewrite {scores.name}: {exc}")
 
+    # Learning Suite takes one zip rather than N uploads. Build it last, so it
+    # captures the restored filenames rather than the codes.
+    if renamed:
+        try:
+            from package_feedback import package
+            zip_path, n = package(fb)
+            print(f"Packaged {n} feedback file(s) -> {zip_path.name} "
+                  f"({zip_path.stat().st_size // 1024} KB) for Learning Suite batch upload")
+        except ImportError:
+            print("warning: could not import package_feedback.py -- no batch upload zip created")
+        except Exception as exc:
+            print(f"warning: could not create the batch upload zip: {exc}")
+
     if orphans:
         print(f"\n  UNMATCHED ({len(orphans)}) -- left as-is:")
         for n in orphans:
