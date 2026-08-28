@@ -425,6 +425,19 @@ def unmask(args):
             except ImportError:
                 print(f"warning: could not import recalc.py -- run it on {scores.name} "
                       "before uploading, or the totals will read as blank")
+
+            # Learning Suite imports a CSV, not the workbook. Build it after the
+            # recalculation, since it reads the cached Total values.
+            try:
+                from export_upload_csv import export
+                csv_path, n, skipped = export(scores)
+                print(f"Wrote {csv_path.name} -- {n} row(s) for Learning Suite grade import")
+                for netid, why in skipped:
+                    print(f"  skipped {netid}: {why}")
+            except ImportError:
+                print("warning: could not import export_upload_csv.py -- no upload CSV created")
+            except Exception as exc:
+                print(f"warning: could not write the upload CSV: {exc}")
         except ImportError:
             print("warning: openpyxl not installed -- scores.xlsx left unmodified")
         except Exception as exc:

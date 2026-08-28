@@ -188,13 +188,19 @@ Write into the workspace, never into a repo:
 - **Feedback documents** — one `.docx` per student in `<assignment>/feedback/`, named `S-XXXXXX_<userfilename>_FEEDBACK.docx`
 - **Score summary** — one `scores.xlsx` in `<assignment>/`, with codes in the identity column
 
-Phase 5 adds `feedback/batch_upload.zip` for Learning Suite. If you graded without de-identifying, `unmask` never runs, so build it yourself:
+Phase 5 adds two upload artifacts:
+
+- `feedback/batch_upload.zip` — every feedback document in one file, for the batch upload
+- `scores_upload.csv` — `Net ID` and one score column, the only shape the Grades import accepts
+
+If you graded without de-identifying, `unmask` never runs, so build them yourself:
 
 ```bash
 python "${CLAUDE_PLUGIN_ROOT}/skills/homework-grader/scripts/package_feedback.py" <assignment>/feedback
+python "${CLAUDE_PLUGIN_ROOT}/skills/homework-grader/scripts/export_upload_csv.py" <assignment>/scores.xlsx
 ```
 
-Rebuild it after any edit to a feedback document — the zip is a snapshot, not a live view.
+Both are snapshots, not live views. Rebuild after editing a feedback document or adjusting a score.
 
 ## Phase 5: Restore Identities
 
@@ -205,7 +211,7 @@ python "${CLAUDE_PLUGIN_ROOT}/skills/homework-grader/scripts/anonymize.py" unmas
     <assignment>/feedback --roster <assignment>/roster.json --scores <assignment>/scores.xlsx
 ```
 
-Feedback files are renamed to `last_first_netid_userfilename_FEEDBACK.docx`, the code inside each document body becomes `First Last (netid)`, and in `scores.xlsx` the codes become NetIDs with the First Name and Last Name columns filled in. The restored documents are then zipped into `feedback/batch_upload.zip`, which is what Learning Suite ingests -- one upload instead of one per student. Rewriting `scores.xlsx` clears the cached formula values, so `unmask` recalculates it for you — if it reports that LibreOffice is missing, run `recalc.py` yourself before uploading or every total will read as blank.
+Feedback files are renamed to `last_first_netid_userfilename_FEEDBACK.docx`, the code inside each document body becomes `First Last (netid)`, and in `scores.xlsx` the codes become NetIDs with the First Name and Last Name columns filled in. The restored documents are then zipped into `feedback/batch_upload.zip`, which is what Learning Suite ingests -- one upload instead of one per student -- and `scores_upload.csv` is written beside `scores.xlsx` for the Grades import. Rewriting `scores.xlsx` clears the cached formula values, so `unmask` recalculates it for you — if it reports that LibreOffice is missing, run `recalc.py` yourself before uploading or every total will read as blank.
 
 Do this **last**, after any regrading. If you regrade after unmasking, re-run `mask` rather than editing de-identified and identified files side by side.
 
@@ -352,6 +358,7 @@ Before delivering results:
 - [ ] Feedback documents pass validation
 - [ ] `scores.xlsx` formulas recalculated
 - [ ] `feedback/batch_upload.zip` exists and holds every feedback document
+- [ ] `scores_upload.csv` exists, has a `Net ID` header, and holds one row per student and no statistics rows
 - [ ] No cascading penalty violations — review anyone who lost points in multiple related areas
 - [ ] Variable inputs accounted for — no false deductions from different input choices
 - [ ] Every deduction includes a teaching explanation, not just "wrong"

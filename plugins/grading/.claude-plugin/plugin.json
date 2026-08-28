@@ -1,7 +1,7 @@
 {
   "name": "grading",
   "description": "Homework grading across paired public content / private instructor course repos",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "author": {
     "name": "Norm Jones",
     "email": "njones61@gmail.com"

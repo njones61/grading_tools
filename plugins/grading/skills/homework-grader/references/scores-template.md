@@ -304,6 +304,22 @@ print(f"Saved: {OUTPUT_PATH}")
 
 ---
 
+## Learning Suite Upload CSV
+
+`scores.xlsx` is the instructor's working sheet; Learning Suite's grade import wants something much narrower, and rejects the rest:
+
+```
+Net ID,Homework 1 - Head Calculations
+mattd1,29
+jra94,30
+```
+
+`Net ID` in the top-left cell, the assignment title beside it, plain numbers, one row per student. Both columns need a header or nothing imports. The max-points row, the per-item columns, and the average rows must all stay out — an `Average (points)` row imports as a student who does not exist.
+
+Do not write this from `grading_results.json`: at that point the identities are still codes. `export_upload_csv.py` derives it from the finished `scores.xlsx`, after `unmask` has restored NetIDs and recalculated the totals, so it also reflects any score you adjusted by hand.
+
+---
+
 ## Recalculation
 
 After creating `scores.xlsx`, recalculate formulas so cached values are correct:
