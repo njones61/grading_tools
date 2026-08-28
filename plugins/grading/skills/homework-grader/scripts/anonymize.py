@@ -145,6 +145,68 @@ def scrub_ooxml(path, variants, code):
         return 0, str(exc)
 
 
+CODE_RE = re.compile(r"S-[0-9A-F]{6}")
+
+
+def restore_ooxml_text(path, by_code):
+    """Replace masked codes with real names inside an OOXML package's text.
+
+    unmask renames feedback files, but a document that shows "Student: S-7F3A2B"
+    in its body still reaches the student that way. This rewrites text nodes
+    only -- the same narrow surface scrub_ooxml touches -- so formatting,
+    formulas, and cached values all survive untouched.
+    """
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    hits = 0
+
+    def repl(m):
+        nonlocal hits
+        def sub_code(cm):
+            nonlocal hits
+            st = by_code.get(cm.group(0))
+            if not st:
+                return cm.group(0)
+            hits += 1
+            return f"{st['first']} {st['last']} ({st['netid']})"
+        return ">" + CODE_RE.sub(sub_code, m.group(1)) + "<"
+
+    try:
+        with zipfile.ZipFile(path) as zin, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                data = zin.read(item.filename)
+                if item.filename.endswith(".xml"):
+                    try:
+                        data = TEXT_NODE.sub(repl, data.decode("utf-8")).encode("utf-8")
+                    except UnicodeDecodeError:
+                        pass
+                zout.writestr(item, data)
+        tmp.replace(path)
+        return hits, None
+    except Exception as exc:
+        tmp.unlink(missing_ok=True)
+        return 0, str(exc)
+
+
+def header_columns(ws):
+    """Locate the First Name / Last Name / Net ID columns in a scores sheet.
+
+    Returns (header_row, {field: column_index}) or (None, {}) if the sheet
+    has no recognizable header row.
+    """
+    wanted = {"firstname": "first", "lastname": "last", "netid": "netid"}
+    for row in ws.iter_rows(min_row=1, max_row=min(ws.max_row, 10)):
+        found = {}
+        for cell in row:
+            if not isinstance(cell.value, str):
+                continue
+            key = re.sub(r"[^a-z]", "", cell.value.lower())
+            if key in wanted:
+                found[wanted[key]] = cell.column
+        if "netid" in found:
+            return row[0].row, found
+    return None, {}
+
+
 def scrub_json(path, variants, code):
     """Scrub a notebook by walking parsed JSON, touching values but never keys."""
     patterns = compile_variants(variants)
@@ -266,7 +328,7 @@ def unmask(args):
     if not fb.is_dir():
         sys.exit(f"error: no such directory: {fb}")
 
-    renamed, orphans = 0, []
+    renamed, orphans, restored_bodies = 0, [], 0
     for f in sorted(fb.iterdir()):
         if not f.is_file() or skip(f):
             continue
@@ -280,26 +342,62 @@ def unmask(args):
             orphans.append(f.name)
             continue
         new_name = f"{st['last']}_{st['first']}_{st['netid']}_{rest}"
-        f.rename(f.with_name(new_name))
+        f = f.rename(f.with_name(new_name))
         renamed += 1
+        # The code is in the document body too, not just the filename.
+        if f.suffix.lower() in OOXML:
+            hits, err = restore_ooxml_text(f, by_code)
+            if err:
+                print(f"warning: could not rewrite text in {f.name}: {err}")
+            elif hits:
+                restored_bodies += 1
 
     print(f"\nRestored {renamed} feedback file(s) in {fb}")
+    if restored_bodies:
+        print(f"  and replaced the code inside {restored_bodies} document body/bodies")
 
     if args.scores:
         scores = args.scores.expanduser().resolve()
         try:
             import openpyxl
             wb = openpyxl.load_workbook(scores)
-            replaced = 0
+            replaced, named = 0, 0
             for ws in wb.worksheets:
+                _, cols = header_columns(ws)
                 for row in ws.iter_rows():
                     for cell in row:
-                        if isinstance(cell.value, str) and cell.value.strip() in by_code:
-                            st = by_code[cell.value.strip()]
-                            cell.value = st["netid"]
-                            replaced += 1
+                        if not (isinstance(cell.value, str) and cell.value.strip() in by_code):
+                            continue
+                        st = by_code[cell.value.strip()]
+                        in_netid_col = cols.get("netid") == cell.column
+                        cell.value = st["netid"]
+                        replaced += 1
+                        # Only fill names alongside a code that sat in the Net ID
+                        # column -- a code elsewhere is not a student row.
+                        if in_netid_col:
+                            for field in ("first", "last"):
+                                col = cols.get(field)
+                                if col:
+                                    ws.cell(row=cell.row, column=col, value=st[field])
+                                    named += 1
             wb.save(scores)
-            print(f"Replaced {replaced} code(s) with NetIDs in {scores.name}")
+            msg = f"Replaced {replaced} code(s) with NetIDs in {scores.name}"
+            if named:
+                msg += f", and filled {named} name cell(s)"
+            print(msg)
+
+            # openpyxl writes formulas without cached values, so the totals and
+            # statistics in scores.xlsx would read as blank until something
+            # recalculates them. Do it here rather than leaving a silent trap.
+            try:
+                from recalc import try_recalc
+                ok, err = try_recalc(scores)
+                print("Recalculated formulas in " + scores.name if ok
+                      else f"warning: {err}\n         run recalc.py on {scores.name} "
+                           f"before uploading, or the totals will read as blank")
+            except ImportError:
+                print(f"warning: could not import recalc.py -- run it on {scores.name} "
+                      "before uploading, or the totals will read as blank")
         except ImportError:
             print("warning: openpyxl not installed -- scores.xlsx left unmodified")
         except Exception as exc:

@@ -91,11 +91,19 @@ const OUT_DIR = 'feedback/';                    // Set to actual path
 
 // ======== HELPER FUNCTIONS ========
 
+// Submissions arrive as .xlsx, .pdf, .docx, .ipynb -- strip whatever extension
+// is on the file, not just .xlsx.
+function stripExt(filename) {
+    return filename.replace(/\.[A-Za-z0-9]+$/, '');
+}
+
+// While grading is de-identified the student IS the code. Emit the bare code
+// here, with nothing appended: anonymize.py unmask finds S-XXXXXX in the
+// document body and swaps in "First Last (netid)", so anything glued to the
+// code would survive into the delivered feedback.
 function extractStudentName(filename) {
-    // Adapt name parsing for each assignment's filename convention
-    let name = filename.replace(/\.xlsx$/i, '');
-    name = name.replace(/^\d+-/, '');
-    return name;
+    const m = filename.match(/^(S-[0-9A-F]{6})/);
+    return m ? m[1] : stripExt(filename);
 }
 
 function scoreColor(total, maxTotal) {
@@ -361,7 +369,7 @@ async function createFeedback(result) {
     });
 
     // --- Save ---
-    let outName = result.filename.replace(/\.xlsx$/i, '_FEEDBACK.docx');
+    const outName = `${stripExt(result.filename)}_FEEDBACK.docx`;
     const outPath = `${OUT_DIR}/${outName}`;
     const buffer = await Packer.toBuffer(doc);
     fs.writeFileSync(outPath, buffer);

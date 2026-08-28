@@ -194,7 +194,7 @@ python "${CLAUDE_PLUGIN_ROOT}/skills/homework-grader/scripts/anonymize.py" unmas
     <assignment>/feedback --roster <assignment>/roster.json --scores <assignment>/scores.xlsx
 ```
 
-Feedback files are renamed to `last_first_netid_userfilename_FEEDBACK.docx` and the codes in `scores.xlsx` become NetIDs.
+Feedback files are renamed to `last_first_netid_userfilename_FEEDBACK.docx`, the code inside each document body becomes `First Last (netid)`, and in `scores.xlsx` the codes become NetIDs with the First Name and Last Name columns filled in. Rewriting `scores.xlsx` clears the cached formula values, so `unmask` recalculates it for you — if it reports that LibreOffice is missing, run `recalc.py` yourself before uploading or every total will read as blank.
 
 Do this **last**, after any regrading. If you regrade after unmasking, re-run `mask` rather than editing de-identified and identified files side by side.
 
@@ -303,6 +303,8 @@ cell.number_format = '0.0"%"'
 ```
 
 Recalculate after creating: `python "${CLAUDE_PLUGIN_ROOT}/skills/homework-grader/scripts/recalc.py" scores.xlsx`
+
+Phase 5 rewrites this file and recalculates it again, so the identity columns matter: put the masked code in the **Net ID** column and leave First Name and Last Name empty. `unmask` fills them from the crosswalk.
 
 ---
 
