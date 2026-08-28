@@ -259,7 +259,7 @@ Create with the `docx` npm package (JavaScript). See `references/feedback-templa
 [original_submission_filename_without_extension]_FEEDBACK.docx
 ```
 
-Validate each: `python scripts/office/validate.py <feedback_file.docx>`
+Validate each: open it with `python-docx` and confirm it has a non-zero paragraph and table count. See the Validation section of `references/feedback-template.md`.
 
 ---
 

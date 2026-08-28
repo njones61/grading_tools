@@ -408,15 +408,27 @@ main().catch(console.error);
 
 ## Validation
 
-After creating feedback documents, validate each one:
+After creating feedback documents, confirm every one opens and carries the content it should:
+
 ```bash
-python scripts/office/validate.py <feedback_file.docx>
+python3 -c '
+import sys
+from docx import Document
+for path in sys.argv[1:]:
+    doc = Document(path)
+    status = "ok" if doc.paragraphs and doc.tables else "SUSPECT"
+    print(f"{status:8} {len(doc.paragraphs):3} paragraphs  {len(doc.tables)} tables  {path}")
+' feedback/*.docx
 ```
 
-If `validate.py` is not available, at minimum check:
-1. File size is > 0 bytes
-2. File can be opened by `python-docx` or LibreOffice without errors
-3. Convert one to PDF and visually inspect:
-   ```bash
-   libreoffice --headless --convert-to pdf <feedback_file.docx>
-   ```
+A document with zero tables never got its rubric summary; regenerate it. A document
+that raises on open is corrupt -- usually a template value that was `undefined` when
+the docx package serialized it.
+
+Spot-check one visually by converting it to PDF:
+
+```bash
+soffice --headless --convert-to pdf <feedback_file.docx>
+# macOS, where soffice is not on PATH:
+# /Applications/LibreOffice.app/Contents/MacOS/soffice --headless --convert-to pdf <file>
+```
