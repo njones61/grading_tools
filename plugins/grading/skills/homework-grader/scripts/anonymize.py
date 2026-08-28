@@ -249,7 +249,9 @@ def mask(args):
         sys.exit(f"error: no submissions found in {src}")
 
     students, used, unparsed = {}, set(), []
-    unscrubbable, errors = [], []
+    unscrubbable, redacted, errors = [], [], []
+    band = getattr(args, "band", 6.0)
+    do_redact = not getattr(args, "no_redact", False)
 
     for f in files:
         m = SUBMISSION_RE.match(f.stem)
@@ -280,7 +282,25 @@ def mask(args):
             if err:
                 errors.append((dest_name, err))
         elif ext in OPAQUE:
-            unscrubbable.append(dest_name)
+            # A scan carries the name as pixels. Black out the header band
+            # locally -- before anything is read, and without sending the page
+            # anywhere to work out where the name is.
+            status, detail = ("skipped", "redaction disabled")
+            if do_redact:
+                try:
+                    from redact_scan import redact
+                    status, detail = redact(dest, band_pct=band)
+                except ImportError:
+                    status, detail = ("skipped", "redact_scan.py not importable")
+                except Exception as exc:
+                    status, detail = ("error", str(exc))
+            if status == "redacted":
+                redacted.append((dest_name, detail))
+            elif status == "error":
+                errors.append((dest_name, f"redaction failed: {detail}"))
+                unscrubbable.append(dest_name)
+            else:
+                unscrubbable.append(dest_name)
         else:
             unscrubbable.append(dest_name)
 
@@ -301,6 +321,13 @@ def mask(args):
         for n in unparsed:
             print(f"      {n}")
         print()
+    if redacted:
+        print(f"  REDACTED ({len(redacted)}) -- header band blacked out, OCR text layer removed:")
+        for n, d in redacted:
+            print(f"      {n}  ({d})")
+        print("  The band is geometric, not a name detector. Look at the previews in")
+        print(f"  {out / 'redaction_previews'} before grading -- a name written down a")
+        print("  margin or on a later page is still there.\n")
     if unscrubbable:
         print(f"  UNSCRUBBABLE ({len(unscrubbable)}) -- filename is masked, but content")
         print(f"  may still identify the student (handwriting, scans, embedded images):")
@@ -433,6 +460,10 @@ def main():
     m.add_argument("submissions_dir", type=Path)
     m.add_argument("--out", type=Path, help="where masked copies go (default: ../masked)")
     m.add_argument("--roster", type=Path, help="crosswalk path (default: ../roster.json)")
+    m.add_argument("--band", type=float, default=6.0,
+                   help="percent of page height to black out on scans (default: 6)")
+    m.add_argument("--no-redact", action="store_true",
+                   help="copy scans through untouched instead of redacting the header band")
     m.set_defaults(func=mask)
 
     u = sub.add_parser("unmask", help="restore real names to generated feedback")

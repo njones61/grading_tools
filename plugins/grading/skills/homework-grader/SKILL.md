@@ -160,7 +160,10 @@ Then **grade the `masked/` directory, not `submissions/`.**
 Read the report the script prints. Two categories need your attention:
 
 - **COULD NOT PARSE** — filenames that don't match `last_first_netid_...`. These are *not* copied. Tell the user; they usually need renaming by hand.
-- **UNSCRUBBABLE** — scanned PDFs and images. The filename is masked but the content may still show a handwritten name. Nothing can fix this automatically. Report it so the user knows which submissions remain identifying.
+- **REDACTED** — scanned PDFs and images whose header band was blacked out. This is destructive: the page is rasterized, the band is painted onto the bitmap, the PDF is rebuilt, and the scanner's OCR text layer goes with it. Tell the user to look at the previews in `masked/redaction_previews/` before you start grading — the band is geometric, not a name detector, so a name written down a margin or on a later page survived it. Adjust with `--band <percent>`, or turn it off with `--no-redact`.
+- **UNSCRUBBABLE** — scans that could not be redacted, and born-digital PDFs, which are skipped because rasterizing would destroy their selectable text. The filename is masked but the content may still show a name. Report it so the user knows which submissions remain identifying.
+
+Detection is deliberately local. Sending a page to a vision model to find the name would transmit the very thing the redaction exists to withhold, so the band is a fixed fraction of page height rather than anything adaptive.
 
 Never open `roster.json` unless you are running `unmask`. Never copy it, quote its contents, or write student names into feedback while grading — the feedback documents are written against codes and get real names back in Phase 5.
 
