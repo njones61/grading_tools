@@ -300,6 +300,10 @@ Read the report the script prints. Three categories need your attention:
 
 Detection is deliberately local. Sending a page to a vision model to find the name would transmit the very thing the redaction exists to withhold, so the band is a fixed fraction of page height rather than anything adaptive.
 
+A name that is also a word this course uses — Wells, Head, Bank, Ford, Brooks — is handled by leaving the bare token alone. The assignment and background markdown were written by you, not the student, so any word in them is domain vocabulary; `mask` reads the files `work/framework.json` names and holds those variants back. The full name is still scrubbed, so "Thomas Wells" goes and "observation wells" stays. It reports every name it restricted, since that is a deliberate reduction in scrubbing: a lone surname on the page will survive.
+
+This is why Phase 2 runs before Phase 2.5. Without `framework.json` the guard is simply off, and a student surnamed Wells gets their own prose mangled into "the S-7F3A2B are screened at 40 ft".
+
 Text scrubbing works from the roster, which holds the *legal* name. It covers common diminutives, so a roster "Thomas" catches a page that says "Tom", and it matches accents loosely in both directions, since students routinely type their own name without them. A preferred name that cannot be derived from the legal one is beyond it. Treat the scrub as reducing exposure rather than eliminating it, and never tell the user a submission came out clean.
 
 Never open `roster.json` unless you are running `unmask`. Never copy it, quote its contents, or write student names into feedback while grading — the feedback documents are written against codes and get real names back in Phase 5.

@@ -283,6 +283,7 @@ Point it at a later download and it becomes a diff: returning students keep thei
 - **COULD NOT PARSE** — filenames not matching `last_first_netid_...`. These are *not* copied. Rename them by hand and re-run.
 - **REDACTED** — scans and images whose header band was blacked out. This is destructive: the page is rasterized, the band is painted onto the bitmap, and the scanner's OCR text layer goes with it. **Look at `masked/redaction_previews/` before grading** — the band is geometry, not a name detector, so a name written down a margin or on a later page is still there. `--band <percent>` adjusts the height; `--no-redact` turns it off.
 - **UNSCRUBBABLE** — what redaction could not cover, plus born-digital PDFs, which are skipped so they keep their selectable text. These may still identify the student.
+- **NAME IS ALSO A COURSE WORD** — a student surnamed Wells, Head or Brooks in a course whose assignment uses that word. Scrubbing the bare token would replace it throughout their own submission and hand the grader prose about "the S-7F3A2B screened at 40 ft", so it is left in place. The full name is still scrubbed; a lone surname on the page is not.
 
 Detection is deliberately local. Sending a page to a vision model to locate the name would transmit the very thing the redaction exists to withhold.
 

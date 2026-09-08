@@ -184,22 +184,77 @@ def fold(s):
                    if not unicodedata.combining(c))
 
 
-def name_variants(last, first, netid):
-    """Strings worth scrubbing from file contents, longest first."""
-    firsts = {first} | {n for n in _NICKNAMES.get(first.lower(), set())}
-    out = {netid}
-    for f in firsts:
-        out |= {f"{f} {last}", f"{last}, {f}", f"{f}{last}", f"{last} {f}", f}
-    out.add(last)
+WORD_RE = re.compile(r"[A-Za-z][A-Za-z\u00c0-\u024f'-]+")
 
-    keep = set()
-    for v in out:
+
+def domain_words(paths):
+    """Vocabulary from the assignment and background, lowercased and folded.
+
+    Anything in this text was written by the instructor, not the student, so a
+    name variant that appears in it is a word this course uses -- Wells, Head,
+    Bank, Ford, Brooks. Scrubbing the bare token would replace it throughout
+    the submission and hand the grader prose about "the S-7F3A2B screened at
+    40 ft", which is a grading problem, not a privacy one.
+    """
+    words = set()
+    for path in paths:
+        path = Path(path)
+        files = sorted(path.rglob("*.md")) if path.is_dir() else [path]
+        for f in files:
+            try:
+                text = f.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            words |= {fold(w).lower() for w in WORD_RE.findall(text)}
+    return words
+
+
+def in_domain(word, domain):
+    """Whether the course's own text uses this word, allowing for a plural.
+
+    A student surnamed Wells reads an assignment that says "observation well".
+    Exact matching misses that by one letter and scrubs their surname out of
+    every sentence they wrote, so the obvious plural counts as the same word.
+    """
+    if word in domain:
+        return True
+    if len(word) < 4:
+        return False
+    for stripped in (word[:-1] if word.endswith("s") else None,
+                     word[:-2] if word.endswith("es") else None):
+        if stripped and stripped in domain:
+            return True
+    return f"{word}s" in domain or f"{word}es" in domain
+
+
+def name_variants(last, first, netid, domain=frozenset()):
+    """Strings worth scrubbing from file contents, longest first.
+
+    Returns (variants, restricted): `restricted` names the bare tokens held
+    back because this course's own material uses them as ordinary words. The
+    full-name forms survive either way, so "Thomas Wells" is still scrubbed
+    even when a bare "Wells" is not.
+    """
+    firsts = {first} | {n for n in _NICKNAMES.get(first.lower(), set())}
+    compound, bare = set(), {last} | firsts
+    for f in firsts:
+        compound |= {f"{f} {last}", f"{last}, {f}", f"{f}{last}", f"{last} {f}"}
+
+    keep, restricted = {netid}, []
+    for v in compound:
+        keep.add(v)
+    for v in bare:
         if len(v) < 2:
             continue
-        if len(v) == 2 and fold(v).lower() in SHORT_WORDS:
+        folded = fold(v).lower()
+        if len(v) == 2 and folded in SHORT_WORDS:
+            continue
+        if in_domain(folded, domain):
+            restricted.append(v)
             continue
         keep.add(v)
-    return sorted(keep, key=len, reverse=True)
+    keep = {v for v in keep if len(v) >= 2}
+    return sorted(keep, key=len, reverse=True), sorted(set(restricted))
 
 
 def _accent_classes():
@@ -443,6 +498,28 @@ def scrub_copy(dest, variants, code, do_redact, band, errors, unscrubbable, reda
 NEEDS_GRADING = {"new", "resubmitted", "added"}
 
 
+def resolve_domain_sources(root, explicit):
+    """Files whose vocabulary counts as this course's, not a student's."""
+    if explicit:
+        return [Path(p).expanduser() for p in explicit]
+
+    fw = root / "work" / "framework.json"
+    if not fw.exists():
+        return []
+    try:
+        doc = json.loads(fw.read_text())
+        src = doc.get("sources", {})
+        repos = {k: Path(v).expanduser() for k, v in src.get("repos", {}).items()}
+        out = []
+        for entry in src.get("files", []):
+            repo = repos.get(entry.get("repo"))
+            if repo:
+                out.append(repo / entry["path"])
+        return out
+    except Exception:
+        return []
+
+
 def check_redaction_stack(files, do_redact):
     """Refuse to start if this batch has scans and the tooling cannot redact them.
 
@@ -535,6 +612,12 @@ def mask(args):
 
     check_redaction_stack(files, not args.no_redact)
 
+    # The assignment and background tell us which words this course uses, so a
+    # student surnamed Wells does not get "observation wells" scrubbed out of
+    # their own submission. framework.json names those files; Phase 2 writes it
+    # before this runs.
+    domain = domain_words(resolve_domain_sources(src.parent, args.domain))
+
     # code -> {masked filename: record} from every earlier round.
     prior_files = {code: {rec["masked"]: rec for rec in st.get("files", [])}
                    for code, st in ledger.get("students", {}).items()}
@@ -542,6 +625,7 @@ def mask(args):
     students = dict(prior)
     used = {s["code"] for s in prior.values()}
     unparsed, unscrubbable, redacted, errors, withheld = [], [], [], [], []
+    restricted = []
     seen = {}          # code -> set of masked names in this batch
     batch = {}         # code -> list of (file, dest_name, sha, mtime, status)
 
@@ -592,7 +676,9 @@ def mask(args):
     renames, to_grade = [], {}
     for code, recs in batch.items():
         st = next(s for s in students.values() if s["code"] == code)
-        variants = name_variants(st["last"], st["first"], st["netid"])
+        variants, held = name_variants(st["last"], st["first"], st["netid"], domain)
+        if held:
+            restricted.append((code, held))
         for r in recs:
             if r["status"] == "renamed":
                 # Same bytes under a new name: refresh the masked copy's name
@@ -731,6 +817,13 @@ def mask(args):
             print(f"      {n}: {why}")
         print("  Fix the file, or redact it by hand, then run this again. Grading the")
         print("  rest of the batch without them is fine -- they are simply not here.\n")
+    if restricted:
+        print(f"  NAME IS ALSO A COURSE WORD ({len(restricted)}) -- the bare token was left")
+        print("  in place, because this assignment's own text uses it. The full name is")
+        print("  still scrubbed; a lone surname on the page is not:")
+        for code, held in sorted(restricted):
+            print(f"      {code}: {', '.join(held)}")
+        print()
     if unparsed:
         print(f"  COULD NOT PARSE ({len(unparsed)}) -- not copied, handle by hand:")
         for n in unparsed:
@@ -978,6 +1071,10 @@ def main():
     m.add_argument("--ledger", type=Path, help="grading state (default: ../ledger.json)")
     m.add_argument("--fresh", action="store_true",
                    help="ignore an existing roster and start the assignment over")
+    m.add_argument("--domain", action="append", metavar="PATH",
+                   help="assignment/background markdown whose words are course "
+                        "vocabulary, not names (default: whatever "
+                        "work/framework.json lists)")
     m.add_argument("--band", type=float, default=6.0,
                    help="percent of page height to black out on scans (default: 6)")
     m.add_argument("--no-redact", action="store_true",
