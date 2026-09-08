@@ -96,10 +96,12 @@ The assignment students read *is* the file the grader grades against — a markd
 
 ```
 ~/grading/ce544/2026-fall/01_head/
-└── submissions/
+└── submissions1/
     ├── Last_First_netid_theirfilename.xlsx
     └── ...
 ```
+
+Number the folder. A later download goes in `submissions2`, and the numbers pair up all the way through: `submissions1` is graded into `feedback1` and uploaded as `scores_upload1.csv`.
 
 Keep Learning Suite's `last_first_netid_...` filenames — the de-identification step parses them.
 
@@ -111,20 +113,74 @@ From the instructor repo:
 grade 01_head
 ```
 
-That's it. The skill runs the whole workflow: sync check, assemble the assignment and key, de-identify, grade, generate feedback, restore names, and build the two upload artifacts.
+The skill runs the workflow: sync check, assemble the assignment and key, de-identify, grade, generate feedback, restore names. It stops there, with everything ready for you to read.
 
-### 3. Upload the results
+### 3. Review the feedback
 
 ```
 ~/grading/ce544/2026-fall/01_head/
-├── feedback/
-│   ├── <one .docx per student, real names restored>
-│   └── batch_upload.zip    ← upload this, not the files individually
-├── scores.xlsx             class summary with statistics, for you
-└── scores_upload.csv       ← Net ID + score, for the Grades import
+├── feedback1/      one .docx per student, real names restored
+└── scores.xlsx     class summary with statistics
 ```
 
-Learning Suite takes the zip for feedback and the CSV for scores. `scores.xlsx` is your working copy and is not uploaded — but if you adjust a score in it, regenerate the CSV so the two agree.
+Read the documents and fix the ones you disagree with. **Edit the document, not the spreadsheet** — the document is what the student reads, and step 4 copies its scores into `scores.xlsx` for you.
+
+### 4. Build the upload artifacts
+
+```
+python "$GT/sync_scores.py" ~/grading/ce544/2026-fall/01_head --apply --zip
+```
+
+This reads every feedback document, writes its scores into `scores.xlsx`, recalculates, and produces:
+
+```
+├── feedback1/batch_upload.zip   ← upload this, not the files individually
+└── scores_upload1.csv           ← Net ID + score, for the Grades import
+```
+
+It also catches the mistake that is easy to make by hand: bumping a score in the summary table and leaving the section line or the totals showing the old number. Run it without `--apply` first to see what it found, and add `--fix-totals` to have it recompute the two displayed totals from the table.
+
+Both artifacts are snapshots. Edit another document afterward and run the command again.
+
+### 5. Late work and resubmissions
+
+Download again into the next numbered folder:
+
+```
+~/grading/ce544/2026-fall/01_head/
+├── submissions1/       the first download
+└── submissions2/       the second one
+```
+
+Then ask for the same thing — `grade 01_head`. Learning Suite hands back the whole class on every download, so the grader hashes each file against the previous round and only grades what actually changed. Students keep the codes their existing feedback carries, and the report tells you exactly what happened:
+
+| | |
+|---|---|
+| **NEW** | first submission from this student |
+| **RESUBMITTED** | content changed — their old feedback and score are being replaced |
+| **ADDED** | a new file alongside one already graded |
+| **UNCHANGED** | already graded, skipped |
+| **RENAMED** | same content under a new filename, nothing to regrade |
+| **MISSING** | graded earlier, not in this download; nothing deleted |
+
+Submission timestamps come with it, so you can see what was late. No penalty is applied automatically — that policy lives in your `grading_guide.md` and stays your call.
+
+Nothing is ever deleted, and the first download stays exactly as it was.
+
+Round 2's work lands in its own folders, so review means reading the three late submissions rather than the whole class again:
+
+```
+~/grading/ce544/2026-fall/01_head/
+├── feedback1/          round 1, already uploaded
+├── feedback2/          ← the only documents to read this time
+├── scores_upload1.csv  round 1's import, already done
+├── scores_upload2.csv  ← the only students to import this time
+└── scores.xlsx         the whole class, with a Round column
+```
+
+Then re-run step 4. It reconciles `scores.xlsx` across every round — one workbook for the class, with a **Round** column recording who was graded when — and writes upload artifacts covering only the round just graded. Importing all forty students again would overwrite any score you had adjusted inside Learning Suite since the first upload; `--round all` exports everyone if you ever want that.
+
+If someone resubmitted, they have a document in both folders. The later one is the score, and `sync_scores.py` says so rather than letting the stale one count.
 
 ---
 
@@ -153,7 +209,15 @@ python "$GT/preflight_sync.py" ~/python_projects/ce544_private --pull
 
 ### Phase 1 — Resolve the assignment
 
-Reads `course.yml`, finds the key folder, reads its `key.md`:
+First it checks whether an earlier round already worked this assignment out:
+
+```bash
+python "$GT/framework.py" check ~/grading/ce544/2026-fall/01_head/work/framework.json
+```
+
+The first pass writes its rubric map, its checker script, and a log of the judgment calls it made to `work/`, and stamps the commit each source file was at. A later round reuses all of it, so the late submissions are graded the same way the first batch was — rebuilding the framework from scratch would produce different partial-credit calls on identical work. If the assignment or key has been edited in between, `check` reports STALE and names the file, and the framework gets rebuilt.
+
+Then it reads `course.yml`, finds the key folder, and reads its `key.md`:
 
 ```markdown
 ---
@@ -169,10 +233,12 @@ Paths in the frontmatter are relative to the **content repo** root.
 ### Phase 2.5 — De-identify
 
 ```bash
-python "$GT/anonymize.py" mask ~/grading/ce544/2026-fall/01_head/submissions
+python "$GT/anonymize.py" mask ~/grading/ce544/2026-fall/01_head/submissions1
 ```
 
-Each student gets a random opaque code (`S-7F3A2B`). Names and NetIDs are scrubbed from spreadsheet cells, document text, and notebook content. The crosswalk lands in `roster.json` at mode 600. Grading then runs against `masked/`, never `submissions/`.
+Each student gets a random opaque code (`S-7F3A2B`). Names and NetIDs are scrubbed from spreadsheet cells, document text, and notebook content. The crosswalk lands in `roster.json` at mode 600. Grading then runs against `masked/`, never `submissions1/`.
+
+Point it at a later download and it becomes a diff: returning students keep their codes, every file is hashed against the previous round, and only new or changed work is copied forward. `masked/TO_GRADE.txt` lists exactly what that round covers. `ledger.json` holds the hashes, submission times and status — keyed by code, no names, so it is safe to read. `--fresh` throws the history away and regrades everyone.
 
 **Read the three categories it reports:**
 
@@ -184,31 +250,39 @@ Detection is deliberately local. Sending a page to a vision model to locate the 
 
 ### Phases 3–4 — Grade and generate
 
-Grades the masked copies against the rubric, writes one feedback `.docx` per student, and builds `scores.xlsx`.
+Grades the files `TO_GRADE.txt` lists, writes one feedback `.docx` per student into that round's `feedback<N>/`, and adds their rows to `scores.xlsx`. Everything it generates along the way — the checker script, the intermediate JSON, the notes — goes in `work/`, so nothing lands in a git repo.
 
 ### Phase 5 — Restore identities
 
 ```bash
-python "$GT/anonymize.py" unmask ~/grading/ce544/2026-fall/01_head/feedback \
+python "$GT/anonymize.py" unmask ~/grading/ce544/2026-fall/01_head/feedback1 \
     --roster ~/grading/ce544/2026-fall/01_head/roster.json \
     --scores ~/grading/ce544/2026-fall/01_head/scores.xlsx
 ```
 
-Do this **last**, after any regrading. It:
+It:
 
 1. renames feedback files to `last_first_netid_...`
 2. replaces the code *inside* each document with `First Last (netid)`
 3. turns codes in `scores.xlsx` into NetIDs and fills the First/Last Name columns
 4. recalculates `scores.xlsx` — rewriting it clears the cached formula values, so skipping this leaves every total blank
-5. writes `scores_upload.csv`
-6. builds `feedback/batch_upload.zip`
 
-Steps 5 and 6 are snapshots. Edit a feedback document or a score afterward and you must rebuild them:
+Safe to run again on a later round: documents restored earlier are recognized and left alone.
+
+### Phase 6 — Reconcile after your review
 
 ```bash
-python "$GT/package_feedback.py"   ~/grading/ce544/2026-fall/01_head/feedback
-python "$GT/export_upload_csv.py"  ~/grading/ce544/2026-fall/01_head/scores.xlsx
+python "$GT/sync_scores.py" ~/grading/ce544/2026-fall/01_head --apply --zip
 ```
+
+The feedback document is the score of record, so this reads them and derives everything else. Without `--apply` it only reports. It:
+
+1. checks each document against itself — the section score line, the summary table, and the two totals, which a hand edit usually leaves disagreeing (`--fix-totals` recomputes the totals from the table; a section line is never rewritten automatically, since the bullets under it explain the number it shows)
+2. writes each document's scores into `scores.xlsx`, leaving the formulas, conditional formatting and statistics rows untouched
+3. stamps the **Round** column, adding it after Total if it isn't there
+4. recalculates, then writes `scores_upload<N>.csv` and `feedback<N>/batch_upload.zip`
+
+The CSV and zip cover only the round just graded. It refuses to build the zip while any document contradicts itself, since that zip is what reaches students.
 
 ---
 
@@ -262,9 +336,11 @@ grading_tools/
         │   └── scores-template.md       xlsx template
         └── scripts/
             ├── preflight_sync.py        verify repos clean and in sync
-            ├── anonymize.py             mask / unmask student identities
+            ├── framework.py             stamp / check the cached rubric map
+            ├── anonymize.py             mask / unmask, and diff later downloads
             ├── redact_scan.py           black out the header band on scans
+            ├── sync_scores.py           feedback docs -> scores.xlsx -> uploads
             ├── recalc.py                recalculate xlsx formulas
-            ├── package_feedback.py      build feedback/batch_upload.zip
-            └── export_upload_csv.py     build scores_upload.csv
+            ├── package_feedback.py      build feedbackN/batch_upload.zip
+            └── export_upload_csv.py     build scores_uploadN.csv
 ```

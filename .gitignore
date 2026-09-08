@@ -1,5 +1,7 @@
 # Never commit a crosswalk -- it maps codes back to real students.
 roster.json
+# Workspace grading state. It carries no names, but it is student work either way.
+ledger.json
 
 .DS_Store
 ._*

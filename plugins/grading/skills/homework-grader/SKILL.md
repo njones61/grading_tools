@@ -28,6 +28,45 @@ Course material is split across two git repos plus a grading workspace. **Nothin
 
 Student submissions and feedback are FERPA-protected education records. They live only in the grading workspace. **Never** copy, move, or write them into either repo, and never commit them — not even temporarily, not even into a gitignored path.
 
+## The Grading Workspace
+
+Every assignment gets one folder, and it has a fixed shape:
+
+```
+<grading_workspace>/<term>/<assignment>/
+├── submissions1/         first download, raw, never modified
+├── feedback1/            what round 1 graded, + its batch_upload.zip
+├── scores_upload1.csv    round 1's grade import
+├── submissions2/         a later download -- late work, resubmissions
+├── feedback2/            what round 2 graded -- the only docs to review
+├── scores_upload2.csv    round 2's grade import
+├── masked/               de-identified copies you actually grade
+│   └── TO_GRADE.txt      what this round needs; ignore the rest
+├── work/                 everything you generate to do the grading
+│   ├── framework.json    the rubric map -- reused by later rounds
+│   ├── grade_*.py        the checker script
+│   ├── make_feedback.js  the docx generator
+│   ├── grading_results.json
+│   └── decisions.md      judgment calls, so round two matches round one
+├── scores.xlsx           the whole class, every round
+├── roster.json           the crosswalk (mode 600)
+└── ledger.json           per-code hashes, timestamps, grading status
+```
+
+**Folders pair up by number.** `submissions1` is graded into `feedback1` and uploaded as `scores_upload1.csv`; `submissions2` into `feedback2`, and so on. One number, the same meaning everywhere. A round's folder holds only the documents that round produced, so the user reviews the three late submissions rather than re-reading forty.
+
+`scores.xlsx` is the exception: one workbook for the whole class, covering every round.
+
+**Every file you create goes under `work/`, addressed by absolute path.** Scripts, intermediate JSON, scratch notes, extracted spreadsheet dumps — all of it. You are usually invoked from the instructor repo, so a relative path writes into a private git repo: it leaves scores where they must never go, and the next Phase 0 preflight fails on a dirty tree. Build the absolute path to `work/` once, at the start of Phase 2, and use it for every write after that.
+
+The three derived artifacts have one direction of flow, and it never reverses:
+
+```
+feedbackN/*.docx  ──►  scores.xlsx  ──►  scores_uploadN.csv  +  feedbackN/batch_upload.zip
+```
+
+The document is what the student reads, so the number in it is the number that reaches the gradebook. Never hand-transcribe a score into `scores.xlsx`; edit the document and re-derive. Phase 6 does the deriving.
+
 ## Phase 0: Sync Preflight — Do This First, Always
 
 You are reading from two repos that other people (TAs, co-instructors) may also edit. Grading against a stale rubric produces confidently wrong results, so verify sync **before reading any course material**.
@@ -52,6 +91,25 @@ Interpreting the result:
 Never work around a failed preflight by reading files anyway. A stale rubric silently produces wrong scores for the whole class — that is far worse than stopping to ask.
 
 ## Phase 1: Resolve the Assignment
+
+### Is this assignment already set up?
+
+Before reading any course material, check whether an earlier round left a framework behind:
+
+```bash
+python "${CLAUDE_PLUGIN_ROOT}/skills/homework-grader/scripts/framework.py" check \
+    <assignment>/work/framework.json
+```
+
+| Result | What to do |
+|---|---|
+| No such file | First round. Do all of Phase 1 and Phase 2. |
+| FRESH | Skip to Phase 2.5. Reuse the rubric map, the checker script, and `work/decisions.md`. |
+| STALE | Re-read the changed material and rebuild the framework. Say which file moved, and whether the already-graded scores need revisiting. |
+
+Reuse is about consistency first. Two students who submitted identical work a week apart must get identical scores, and a rubric map rebuilt from scratch for the second batch will make different partial-credit calls than the first. It costs far fewer tokens too, which is why it is worth checking before you read anything.
+
+Reuse the framework, and re-read the assignment or key only when a submission does something the checker cannot classify.
 
 ### Read `course.yml`
 
@@ -142,20 +200,82 @@ Before opening any student file:
 1. **Map the rubric** — list every line item and its points. Confirm the sum matches the stated total; if not, flag it to the user, since it means the assignment markdown has a bug worth fixing in the content repo.
 2. **Identify what to check per item** — specific formulas, values, functions, named ranges.
 3. **Identify variable inputs** — cells where students legitimately choose different values (dropdowns, self-selected parameters). The key shows one set; students may have others. You must compute expected outputs from *the student's* inputs.
-4. **Write a grading script** — Python with `openpyxl` for spreadsheets, appropriate tools otherwise. Programmatic checking is more consistent than eyeballing. Keep the script in the workspace, not in a repo.
+4. **Write a grading script** — Python with `openpyxl` for spreadsheets, appropriate tools otherwise. Programmatic checking is more consistent than eyeballing. Write it to `<assignment>/work/`, by absolute path.
+
+### Save the framework
+
+Write what you just worked out to `work/framework.json`, so a later batch grades the same way:
+
+```json
+{
+  "course": "CE 544",
+  "assignment_name": "Head Calculations",
+  "total_points": 30,
+  "built": "2026-09-08",
+  "rubric": [
+    {"key": "part1", "label": "Part 1 - Head at the well",
+     "section": "Part 1: Total Head", "max": 10,
+     "checks": "H = z + p/gamma from the student's own datum; VLOOKUP against Table 3"}
+  ],
+  "variable_inputs": "Datum elevation is student-chosen; compute expected values from B4.",
+  "sources": {
+    "repos": {"content": "/abs/path/ce544", "instructor": "/abs/path/ce544_private"},
+    "files": [
+      {"repo": "content", "path": "docs/unit1/01_head/head_hw.md"},
+      {"repo": "content", "path": "docs/unit1/01_head/head_read.md"},
+      {"repo": "instructor", "path": "keys/unit1/01_head/key.md"},
+      {"repo": "instructor", "path": "keys/unit1/01_head/head_hw (KEY).xlsx"},
+      {"repo": "instructor", "path": "grading_guide.md"}
+    ]
+  }
+}
+```
+
+List every file you read to build the framework. Then stamp it:
+
+```bash
+python "${CLAUDE_PLUGIN_ROOT}/skills/homework-grader/scripts/framework.py" stamp \
+    <assignment>/work/framework.json
+```
+
+That records the commit each source file is currently at, which is what the Phase 1 freshness check compares against next time.
+
+Also start `work/decisions.md`, and append to it every time you make a judgment call the rubric does not settle — an approach you accepted as a valid alternative, how much partial credit a particular wrong turn earned, a units convention you let pass. That file is what keeps the late batch consistent with the first one, and it is the thing a script cannot reconstruct. When the same decision comes up in a second assignment, it has outgrown this file: move it to `key.md` or `grading_guide.md`.
 
 ## Phase 2.5: De-identify Submissions
 
 Student work is FERPA-protected. Before grading, replace student identities with opaque codes, so the graded material carries no names or NetIDs:
 
+Point it at the newest `submissions<N>` folder — `submissions1` the first time, `submissions2` for a later download:
+
 ```bash
 python "${CLAUDE_PLUGIN_ROOT}/skills/homework-grader/scripts/anonymize.py" mask \
-    <grading_workspace>/<term>/<assignment>/submissions
+    <grading_workspace>/<term>/<assignment>/submissions2
 ```
 
 This copies submissions to `masked/` with names replaced by random codes (`S-7F3A2B`), scrubs names out of spreadsheet cells, document text, and notebook content, and writes `roster.json` — the crosswalk — at mode 600.
 
 Then **grade the `masked/` directory, not `submissions/`.**
+
+### Later downloads
+
+Learning Suite hands back the whole class every time you download, so a second pull is a superset of the first. `mask` sorts that out itself: an existing `roster.json` means this is a later batch, returning students keep the codes their feedback and scores already carry, and every file is hashed against the previous round.
+
+| Report line | Meaning |
+|---|---|
+| **NEW** | first submission from this student |
+| **RESUBMITTED** | content changed — their existing feedback and score are stale and are being replaced |
+| **ADDED** | a new file alongside one already graded |
+| **UNCHANGED, REGRADED ANYWAY** | this student submitted something new, so their whole set goes back to you |
+| **UNCHANGED** | already graded, not copied forward |
+| **RENAMED** | same bytes, new filename — nothing to regrade |
+| **MISSING** | graded earlier, absent from this download; nothing was deleted |
+
+Content hash decides, the timestamp explains. Report the submission times to the user for anything new or resubmitted — late policy is theirs to apply, and `grading_guide.md` is where it lives.
+
+A student is regraded whole. If one of their three files changed, all three come back, so partial credit is judged against the complete submission rather than the fragment that moved.
+
+`--fresh` throws the history away and starts the assignment over. Use it only if the user asks for a clean regrade of everyone.
 
 Read the report the script prints. Two categories need your attention:
 
@@ -171,9 +291,11 @@ If the user explicitly says to skip de-identification, that's their call as the 
 
 ## Phase 3: Grade Each Submission
 
-Grade the files in `<grading_workspace>/<term>/<assignment>/masked/`.
+Grade exactly the files `masked/TO_GRADE.txt` lists, in `<grading_workspace>/<term>/<assignment>/masked/`. On a first round that is everything; on a later one it is the new and changed work, and the rest of `masked/` is already graded. Regrading a student whose work has not changed wastes the round and risks handing them a different score for the same submission.
 
 Masked filenames are `S-XXXXXX_userfilename.ext`. Use the code as the student's identity throughout grading — in your notes, in the feedback documents, and in `scores.xlsx`.
+
+`ledger.json` carries each file's hash, submission time and grading status, keyed by code and holding no names. Read it freely. `roster.json` stays closed until Phase 5.
 
 For each submission:
 
@@ -185,22 +307,19 @@ For each submission:
 
 Write into the workspace, never into a repo:
 
-- **Feedback documents** — one `.docx` per student in `<assignment>/feedback/`, named `S-XXXXXX_<userfilename>_FEEDBACK.docx`
+- **Feedback documents** — one `.docx` per student in `<assignment>/feedback<N>/`, where N is the round `mask` reported, named `S-XXXXXX_<userfilename>_FEEDBACK.docx`
 - **Score summary** — one `scores.xlsx` in `<assignment>/`, with codes in the identity column
 
-Phase 5 adds two upload artifacts:
+The upload artifacts — `scores_upload<N>.csv` and `feedback<N>/batch_upload.zip` — are **not** built here. Every document gets reviewed before it goes out, so an artifact built now would be a snapshot of the draft. Phase 6 builds both from the reviewed versions.
 
-- `feedback/batch_upload.zip` — every feedback document in one file, for the batch upload
-- `scores_upload.csv` — `Net ID` and one score column, the only shape the Grades import accepts
+### On a later batch
 
-If you graded without de-identifying, `unmask` never runs, so build them yourself:
+`scores.xlsx` and the earlier rounds' feedback folders already exist.
 
-```bash
-python "${CLAUDE_PLUGIN_ROOT}/skills/homework-grader/scripts/package_feedback.py" <assignment>/feedback
-python "${CLAUDE_PLUGIN_ROOT}/skills/homework-grader/scripts/export_upload_csv.py" <assignment>/scores.xlsx
-```
+- **Feedback documents** — write one for each student in `TO_GRADE.txt`, into this round's folder. A resubmitting student keeps their round-1 document where it is and gets a fresh one here; Phase 6 treats the later one as the score and reports the earlier as superseded. Say in your report whose feedback was replaced, since the user may already have reviewed the old one.
+- **`scores.xlsx`** — one workbook for the whole class, never one per round. Add a row for each new student and update the changed ones. Insert new rows above the statistics block, then fix what the insert broke: the `=SUM()` in each new row's Total cell, the `=AVERAGE()` ranges in the statistics rows, and the ranges the conditional formatting rules cover. Sort by identity again afterward. Leave the **Round** column alone — Phase 6 fills it.
 
-Both are snapshots, not live views. Rebuild after editing a feedback document or adjusting a score.
+Then let Phase 6 reconcile — it will tell you if a row and its document disagree.
 
 ## Phase 5: Restore Identities
 
@@ -211,11 +330,37 @@ python "${CLAUDE_PLUGIN_ROOT}/skills/homework-grader/scripts/anonymize.py" unmas
     <assignment>/feedback --roster <assignment>/roster.json --scores <assignment>/scores.xlsx
 ```
 
-Feedback files are renamed to `last_first_netid_userfilename_FEEDBACK.docx`, the code inside each document body becomes `First Last (netid)`, and in `scores.xlsx` the codes become NetIDs with the First Name and Last Name columns filled in. The restored documents are then zipped into `feedback/batch_upload.zip`, which is what Learning Suite ingests -- one upload instead of one per student -- and `scores_upload.csv` is written beside `scores.xlsx` for the Grades import. Rewriting `scores.xlsx` clears the cached formula values, so `unmask` recalculates it for you — if it reports that LibreOffice is missing, run `recalc.py` yourself before uploading or every total will read as blank.
+Feedback files are renamed to `last_first_netid_userfilename_FEEDBACK.docx`, the code inside each document body becomes `First Last (netid)`, and in `scores.xlsx` the codes become NetIDs with the First Name and Last Name columns filled in. Rewriting `scores.xlsx` clears the cached formula values, so `unmask` recalculates it for you — if it reports that LibreOffice is missing, run `recalc.py` yourself or every total will read as blank.
 
-Do this **last**, after any regrading. If you regrade after unmasking, re-run `mask` rather than editing de-identified and identified files side by side.
+Running it again is safe. On a later batch the feedback folder holds a mix — documents restored last round carry real names, this round's carry codes — and the script recognizes the restored ones and leaves them alone.
 
 Report any UNMATCHED files the script lists — those are feedback documents whose code isn't in the crosswalk, usually meaning a file was hand-renamed mid-grading.
+
+## Phase 6: Reconcile After Review
+
+The user reads the feedback documents and edits the ones they disagree with. Their edits are the final word, so the spreadsheet and the upload artifacts get rebuilt from the documents rather than typed in again:
+
+```bash
+python "${CLAUDE_PLUGIN_ROOT}/skills/homework-grader/scripts/sync_scores.py" \
+    <assignment> --apply --zip
+```
+
+It reads every round's documents, writes each one's rubric scores into `scores.xlsx` in place — the `=SUM()` formulas, conditional formatting and statistics rows are left alone — recalculates, then writes this round's `scores_upload<N>.csv` and `feedback<N>/batch_upload.zip`. Without `--apply` it only reports.
+
+`scores.xlsx` covers the whole class, so reconciling it reads every round. The upload artifacts cover only the round just graded: re-importing the whole class would overwrite any score the user had adjusted inside Learning Suite since the last upload. `--round all` exports everyone if they ever want that.
+
+Run it without `--apply` before handing the batch over for review, and with `--apply --zip` after. What it reports:
+
+- **DOCUMENT DISAGREES WITH ITSELF** — a hand edit that changed the summary table but not the per-section score line, or either total. `--fix-totals` recomputes the two totals from the table's Earned column. A section score line is never rewritten automatically: the feedback bullets under it explain the deduction it shows, and changing the number without the prose leaves the document contradicting its own explanation. Take those to the user.
+- **NOT IN THE WORKBOOK** — a student graded in a later batch who has no row yet. `--apply` refuses to write until you add the rows, because inserting them means re-ranging formulas.
+- **SUPERSEDED** — a student with documents in two rounds, meaning they resubmitted. The later one is the score; the earlier is left in place as a record.
+
+It also stamps each student's round into the **Round** column of `scores.xlsx`, adding the column if it isn't there. One workbook holds the whole class, and that column is how you see who was graded when.
+- **OUT OF SYNC** — the workbook and the document differ. `--apply` makes the workbook match the document.
+
+It refuses to build the zip while any document contradicts itself, since that zip is what reaches students.
+
+The upload artifacts are snapshots. Any later edit to a document or a score means running this again.
 
 ---
 
@@ -350,6 +495,10 @@ Recalculate after creating: `python "${CLAUDE_PLUGIN_ROOT}/skills/homework-grade
 
 Phase 5 rewrites this file and recalculates it again, so the identity columns matter: put the masked code in the **Net ID** column and leave First Name and Last Name empty. `unmask` fills them from the crosswalk.
 
+Keep one rubric column per rubric item, in the same order the feedback document's summary table lists them. `sync_scores.py` pairs the two up by position, so a column that doesn't correspond to a rubric row breaks the reconciliation.
+
+A **Round** column goes last, after Total, recording which round each student's score came from. Phase 6 creates it and fills it in — leave it out when you build the sheet, and never put it before Total, since that would shift the rubric columns the pairing depends on.
+
 ---
 
 ## Handling Different File Types
@@ -376,20 +525,25 @@ Adapt the reading approach; the grading principles and output format don't chang
 
 ## Quick Reference Checklist
 
-Before delivering results:
+Before handing the batch over for review:
 
 - [ ] Phase 0 preflight passed — both repos clean and in sync
+- [ ] Framework checked FRESH, or rebuilt and re-stamped
 - [ ] Rubric point items sum to the assignment's stated total
-- [ ] Every submission has a feedback `.docx` in `feedback/`
-- [ ] `scores.xlsx` exists with all students, statistics, and formatting
+- [ ] Every file in `TO_GRADE.txt` has a feedback `.docx` in this round's `feedback<N>/`
+- [ ] Nothing outside `TO_GRADE.txt` was regraded
+- [ ] `scores.xlsx` holds every student across all batches, with statistics and formatting
 - [ ] Feedback documents pass validation
 - [ ] `scores.xlsx` formulas recalculated
-- [ ] `feedback/batch_upload.zip` exists and holds every feedback document
-- [ ] `scores_upload.csv` exists, has a `Net ID` header, and holds one row per student and no statistics rows
+- [ ] `sync_scores.py` (no `--apply`) reports no drift and no self-contradicting document
 - [ ] No cascading penalty violations — review anyone who lost points in multiple related areas
 - [ ] Variable inputs accounted for — no false deductions from different input choices
 - [ ] Every deduction includes a teaching explanation, not just "wrong"
-- [ ] **No student file was written into either git repo**
+- [ ] Resubmissions reported with both timestamps, and whose earlier feedback was replaced
+- [ ] `work/decisions.md` records the judgment calls this round made
+- [ ] Every file you generated is under `work/` — **run the Phase 0 preflight again and confirm both repos are still clean**
+
+The upload artifacts come after the user's review, from Phase 6.
 
 ## File Size and Format Pitfalls
 

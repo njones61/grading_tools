@@ -6,15 +6,25 @@ Implements the coded de-identification pattern FERPA contemplates at
 from their name, NetID, or any other personal information, and the crosswalk
 mapping codes back to students never leaves this machine.
 
-    anonymize.py mask   <submissions_dir> [--out DIR] [--roster FILE]
+    anonymize.py mask   <submissions_dir> [--out DIR] [--roster FILE] [--fresh]
     anonymize.py unmask <feedback_dir>    --roster FILE [--scores FILE]
 
 `mask` copies submissions into a working directory with student-identifying
 filenames replaced by codes, scrubs names out of file formats that store
 text, and writes the crosswalk. Grade the masked copies.
 
+`mask` is incremental. Run it again against a later download -- late work,
+resubmissions -- and it reuses each returning student's existing code, hashes
+every file against the previous round, and copies forward only what actually
+needs grading. `ledger.json` records the per-file hashes and submission times
+that make that comparison possible; unlike the crosswalk it holds no names,
+so it is the file to read when you want to know what state a batch is in.
+`--fresh` ignores an existing roster and starts the assignment over.
+
 `unmask` renames the generated feedback documents back to real student
-filenames and substitutes real names into scores.xlsx, ready for upload.
+filenames and substitutes real names into scores.xlsx, ready for upload. It
+is safe to run repeatedly: documents already restored in an earlier round are
+recognized and left alone.
 
 IMPORTANT LIMITS -- read the report `mask` prints:
   * Scanned PDFs and images cannot be scrubbed. A handwritten name or a
@@ -29,6 +39,7 @@ for your institution's registrar or FERPA officer.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -37,6 +48,7 @@ import shutil
 import stat
 import sys
 import zipfile
+from datetime import datetime
 from pathlib import Path
 
 # last_first_netid_whatever.ext -- the Learning Suite download convention.
@@ -55,6 +67,28 @@ SKIP_NAMES = {"Icon\r", "Icon", ".DS_Store", "Thumbs.db"}
 def skip(p):
     return (p.name in SKIP_NAMES or p.name.startswith("~$")
             or p.name.startswith("._") or p.name.startswith(".~lock"))
+
+
+def sha256_of(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def when(ts):
+    """A file timestamp as a readable local string."""
+    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
+
+
+def load_ledger(path):
+    if path.exists():
+        try:
+            return json.loads(path.read_text())
+        except Exception:
+            pass
+    return {"batches": [], "students": {}}
 
 
 def new_code(used):
@@ -232,6 +266,45 @@ def scrub_json(path, variants, code):
         return 0, str(exc)
 
 
+def scrub_copy(dest, variants, code, do_redact, band, errors, unscrubbable, redacted):
+    """Scrub or redact one masked copy in place, recording what happened."""
+    ext = dest.suffix.lower()
+    if ext in OOXML:
+        _, err = scrub_ooxml(dest, variants, code)
+        if err:
+            errors.append((dest.name, err))
+    elif ext in JSON_LIKE:
+        _, err = scrub_json(dest, variants, code)
+        if err:
+            errors.append((dest.name, err))
+    elif ext in OPAQUE:
+        # A scan carries the name as pixels. Black out the header band
+        # locally -- before anything is read, and without sending the page
+        # anywhere to work out where the name is.
+        status, detail = ("skipped", "redaction disabled")
+        if do_redact:
+            try:
+                from redact_scan import redact
+                status, detail = redact(dest, band_pct=band)
+            except ImportError:
+                status, detail = ("skipped", "redact_scan.py not importable")
+            except Exception as exc:
+                status, detail = ("error", str(exc))
+        if status == "redacted":
+            redacted.append((dest.name, detail))
+        elif status == "error":
+            errors.append((dest.name, f"redaction failed: {detail}"))
+            unscrubbable.append(dest.name)
+        else:
+            unscrubbable.append(dest.name)
+    else:
+        unscrubbable.append(dest.name)
+
+
+# A file needing to be graded, versus one already accounted for last round.
+NEEDS_GRADING = {"new", "resubmitted", "added"}
+
+
 def mask(args):
     src = args.submissions_dir.expanduser().resolve()
     if not src.is_dir():
@@ -239,19 +312,39 @@ def mask(args):
 
     out = (args.out or src.parent / "masked").expanduser().resolve()
     roster_path = (args.roster or src.parent / "roster.json").expanduser().resolve()
+    ledger_path = (args.ledger or src.parent / "ledger.json").expanduser().resolve()
 
-    if out.exists() and any(out.iterdir()):
-        sys.exit(f"error: {out} exists and is not empty -- remove it or pass --out")
+    # An existing crosswalk means this assignment has been masked before, so
+    # this is a later batch: returning students keep the codes their round-one
+    # feedback and scores already carry.
+    prior, ledger = {}, {"batches": [], "students": {}}
+    if roster_path.exists() and not args.fresh:
+        try:
+            doc = json.loads(roster_path.read_text())
+            prior = {s["netid"].lower(): s for s in doc.get("students", [])}
+        except Exception as exc:
+            sys.exit(f"error: could not read {roster_path}: {exc}")
+        ledger = load_ledger(ledger_path)
+    incremental = bool(prior)
+
+    if not incremental and out.exists() and any(out.iterdir()):
+        sys.exit(f"error: {out} exists and is not empty -- remove it, pass --out, "
+                 f"or run against a roster to add a later batch")
     out.mkdir(parents=True, exist_ok=True)
 
     files = [f for f in sorted(src.iterdir()) if f.is_file() and not skip(f)]
     if not files:
         sys.exit(f"error: no submissions found in {src}")
 
-    students, used, unparsed = {}, set(), []
-    unscrubbable, redacted, errors = [], [], []
-    band = getattr(args, "band", 6.0)
-    do_redact = not getattr(args, "no_redact", False)
+    # code -> {masked filename: record} from every earlier round.
+    prior_files = {code: {rec["masked"]: rec for rec in st.get("files", [])}
+                   for code, st in ledger.get("students", {}).items()}
+
+    students = dict(prior)
+    used = {s["code"] for s in prior.values()}
+    unparsed, unscrubbable, redacted, errors = [], [], [], []
+    seen = {}          # code -> set of masked names in this batch
+    batch = {}         # code -> list of (file, dest_name, sha, mtime, status)
 
     for f in files:
         m = SUBMISSION_RE.match(f.stem)
@@ -260,49 +353,74 @@ def mask(args):
             continue
         last, first, netid = m["last"], m["first"], m["netid"]
         key = netid.lower()
-        if key not in students:
+        is_new_student = key not in students
+        if is_new_student:
             students[key] = {
                 "code": new_code(used), "last": last, "first": first,
                 "netid": netid, "files": [],
             }
         st = students[key]
-        dest_name = f"{st['code']}_{m['rest']}{f.suffix}"
-        dest = out / dest_name
-        shutil.copy2(f, dest)
-        st["files"].append({"original": f.name, "masked": dest_name})
+        code = st["code"]
+        dest_name = f"{code}_{m['rest']}{f.suffix}"
+        sha = sha256_of(f)
+        pf = prior_files.get(code, {})
+        seen.setdefault(code, set()).add(dest_name)
 
-        variants = name_variants(last, first, netid)
-        ext = f.suffix.lower()
-        if ext in OOXML:
-            hits, err = scrub_ooxml(dest, variants, st["code"])
-            if err:
-                errors.append((dest_name, err))
-        elif ext in JSON_LIKE:
-            hits, err = scrub_json(dest, variants, st["code"])
-            if err:
-                errors.append((dest_name, err))
-        elif ext in OPAQUE:
-            # A scan carries the name as pixels. Black out the header band
-            # locally -- before anything is read, and without sending the page
-            # anywhere to work out where the name is.
-            status, detail = ("skipped", "redaction disabled")
-            if do_redact:
-                try:
-                    from redact_scan import redact
-                    status, detail = redact(dest, band_pct=band)
-                except ImportError:
-                    status, detail = ("skipped", "redact_scan.py not importable")
-                except Exception as exc:
-                    status, detail = ("error", str(exc))
-            if status == "redacted":
-                redacted.append((dest_name, detail))
-            elif status == "error":
-                errors.append((dest_name, f"redaction failed: {detail}"))
-                unscrubbable.append(dest_name)
-            else:
-                unscrubbable.append(dest_name)
+        if is_new_student:
+            status = "new"
+        elif dest_name in pf:
+            status = "unchanged" if pf[dest_name].get("sha256") == sha else "resubmitted"
+        elif any(rec.get("sha256") == sha for rec in pf.values()):
+            status = "renamed"
+        elif not pf and (out / dest_name).exists():
+            # Masked in an earlier round that predates the ledger: the masked
+            # copy is the only evidence, and it cannot be hashed against the
+            # source because scrubbing changed it. Take its presence as proof.
+            status = "unchanged"
         else:
-            unscrubbable.append(dest_name)
+            status = "added"
+
+        batch.setdefault(code, []).append(
+            {"file": f, "masked": dest_name, "sha256": sha,
+             "submitted": f.stat().st_mtime, "status": status})
+
+    # A student is regraded whole. If any one file is new or changed, every
+    # file they submitted goes back to the grader, so partial credit is judged
+    # against the complete submission rather than the fragment that changed.
+    regrade = {code for code, recs in batch.items()
+               if any(r["status"] in NEEDS_GRADING for r in recs)}
+
+    renames, to_grade = [], {}
+    for code, recs in batch.items():
+        st = next(s for s in students.values() if s["code"] == code)
+        variants = name_variants(st["last"], st["first"], st["netid"])
+        for r in recs:
+            if r["status"] == "renamed":
+                # Same bytes under a new name: refresh the masked copy's name
+                # so the folder matches the ledger, but nothing needs regrading.
+                old = next(name for name, rec in prior_files.get(code, {}).items()
+                           if rec.get("sha256") == r["sha256"])
+                renames.append((old, r["masked"]))
+                (out / old).unlink(missing_ok=True)
+            elif code not in regrade:
+                continue
+            shutil.copy2(r["file"], out / r["masked"])
+            scrub_copy(out / r["masked"], variants, code, not args.no_redact,
+                       args.band, errors, unscrubbable, redacted)
+        # Keep the crosswalk's file list a union across rounds -- unmask reads it.
+        known = {e["masked"] for e in st["files"]}
+        for r in recs:
+            if r["masked"] not in known:
+                st["files"].append({"original": r["file"].name, "masked": r["masked"]})
+        if code in regrade:
+            to_grade[code] = [r["masked"] for r in recs]
+
+    # Files this batch did not include, but earlier rounds did. A file the
+    # student renamed is still here under its new name, so it is not missing.
+    renamed_away = {old for old, _ in renames}
+    missing = [(code, name) for code, pf in prior_files.items()
+               for name in pf
+               if name not in seen.get(code, set()) and name not in renamed_away]
 
     roster = {
         "source": str(src),
@@ -312,10 +430,82 @@ def mask(args):
     roster_path.write_text(json.dumps(roster, indent=2))
     os.chmod(roster_path, stat.S_IRUSR | stat.S_IWUSR)  # 600 -- owner only
 
-    print(f"\nMasked {len(files) - len(unparsed)} file(s) for {len(students)} student(s)")
-    print(f"  masked copies : {out}")
-    print(f"  crosswalk     : {roster_path}  (mode 600)\n")
+    # The ledger carries hashes, timestamps and status but no names, so it is
+    # safe to read while grading. The crosswalk stays closed.
+    if src.name not in ledger["batches"]:
+        ledger["batches"].append(src.name)
+    # Folders pair up by number: submissions2 is graded into feedback2 and
+    # uploaded as scores_upload2.csv. One number, the same meaning everywhere.
+    rnd = ledger["batches"].index(src.name) + 1
+    fb_dir = f"feedback{rnd}"
+    ledger["updated"] = datetime.now().isoformat(timespec="seconds")
+    for code, recs in batch.items():
+        entry = ledger["students"].setdefault(code, {"files": [], "status": "needs_grading"})
+        by_name = {e["masked"]: e for e in entry["files"]}
+        for name, _ in renames:
+            by_name.pop(name, None)
+        for r in recs:
+            by_name[r["masked"]] = {
+                "masked": r["masked"], "sha256": r["sha256"],
+                "submitted": datetime.fromtimestamp(r["submitted"]).isoformat(timespec="seconds"),
+                "batch": src.name,
+            }
+        entry["files"] = [by_name[k] for k in sorted(by_name)]
+        if code in regrade:
+            entry["status"] = "needs_grading"
+            entry["queued_by"] = src.name
+            entry["round"] = rnd
+    ledger_path.write_text(json.dumps(ledger, indent=2))
 
+    todo = out / "TO_GRADE.txt"
+    if to_grade:
+        todo.write_text("\n".join(
+            name for code in sorted(to_grade) for name in sorted(to_grade[code])) + "\n")
+    else:
+        todo.write_text("")
+
+    # ---- report ----
+    print(f"\nRound {rnd}: masked {sum(len(v) for v in batch.values())} file(s) for "
+          f"{len(batch)} student(s) from {src.name}/")
+    print(f"  masked copies : {out}")
+    print(f"  crosswalk     : {roster_path}  (mode 600)")
+    print(f"  ledger        : {ledger_path}\n")
+
+    def show(header, rows, note=None):
+        if not rows:
+            return
+        print(f"  {header} ({len(rows)}):")
+        for r in rows:
+            print(f"      {r['masked']}   submitted {when(r['submitted'])}")
+        if note:
+            print(f"  {note}")
+        print()
+
+    def having(status, regraded=None):
+        return [r for code, recs in sorted(batch.items()) for r in recs
+                if r["status"] == status
+                and (regraded is None or (code in regrade) == regraded)]
+
+    show("NEW -- first submission from this student", having("new"))
+    show("RESUBMITTED -- content changed since the last round", having("resubmitted"),
+         "Their existing feedback document and score are now stale and are being replaced.")
+    show("ADDED -- new file alongside one already graded", having("added"))
+    show("UNCHANGED, REGRADED ANYWAY -- this student submitted something new, so their "
+         "whole\n  submission goes back to the grader", having("unchanged", regraded=True))
+    show("UNCHANGED -- already graded, not copied forward",
+         having("unchanged", regraded=False))
+
+    if renames:
+        print(f"  RENAMED ({len(renames)}) -- same content, new filename:")
+        for old, new in renames:
+            print(f"      {old}  ->  {new}")
+        print()
+    if missing:
+        print(f"  MISSING ({len(missing)}) -- graded earlier, absent from this download.")
+        print("  Nothing was deleted; their feedback and scores stand:")
+        for code, name in sorted(missing):
+            print(f"      {name}")
+        print()
     if unparsed:
         print(f"  COULD NOT PARSE ({len(unparsed)}) -- not copied, handle by hand:")
         for n in unparsed:
@@ -340,6 +530,13 @@ def mask(args):
             print(f"      {n}: {e}")
         print()
 
+    if to_grade:
+        print(f"  GRADE THESE {sum(len(v) for v in to_grade.values())} file(s) "
+              f"for {len(to_grade)} student(s) -- listed in {todo}")
+        print(f"  Write their feedback documents into {src.parent / fb_dir}/ -- one folder")
+        print(f"  per round, so the user reads only what this round produced.")
+    else:
+        print("  Nothing to grade: every file in this batch was graded in an earlier round.")
     print("  Grade the masked copies. Do not commit the crosswalk to git.\n")
     return 1 if (unparsed or errors) else 0
 
@@ -355,13 +552,25 @@ def unmask(args):
     if not fb.is_dir():
         sys.exit(f"error: no such directory: {fb}")
 
-    renamed, orphans, restored_bodies = 0, [], 0
+    # Late batches mean unmask runs more than once, so the feedback folder is a
+    # mix: documents restored last round already carry real names. Recognize
+    # them by their NetID rather than reporting them as failures.
+    known_netids = {s["netid"].lower() for s in roster["students"]}
+
+    def already_restored(name):
+        m = SUBMISSION_RE.match(Path(name).stem)
+        return bool(m) and m["netid"].lower() in known_netids
+
+    renamed, orphans, restored_bodies, skipped = 0, [], 0, 0
     for f in sorted(fb.iterdir()):
         if not f.is_file() or skip(f):
             continue
         m = re.match(r"^(S-[0-9A-F]{6})_(.*)$", f.name)
         if not m:
-            orphans.append(f.name)
+            if already_restored(f.name):
+                skipped += 1
+            else:
+                orphans.append(f.name)
             continue
         code, rest = m.group(1), m.group(2)
         st = by_code.get(code)
@@ -382,6 +591,8 @@ def unmask(args):
     print(f"\nRestored {renamed} feedback file(s) in {fb}")
     if restored_bodies:
         print(f"  and replaced the code inside {restored_bodies} document body/bodies")
+    if skipped:
+        print(f"  ({skipped} already carried real names from an earlier round -- left alone)")
 
     if args.scores:
         scores = args.scores.expanduser().resolve()
@@ -425,36 +636,18 @@ def unmask(args):
             except ImportError:
                 print(f"warning: could not import recalc.py -- run it on {scores.name} "
                       "before uploading, or the totals will read as blank")
-
-            # Learning Suite imports a CSV, not the workbook. Build it after the
-            # recalculation, since it reads the cached Total values.
-            try:
-                from export_upload_csv import export
-                csv_path, n, skipped = export(scores)
-                print(f"Wrote {csv_path.name} -- {n} row(s) for Learning Suite grade import")
-                for netid, why in skipped:
-                    print(f"  skipped {netid}: {why}")
-            except ImportError:
-                print("warning: could not import export_upload_csv.py -- no upload CSV created")
-            except Exception as exc:
-                print(f"warning: could not write the upload CSV: {exc}")
         except ImportError:
             print("warning: openpyxl not installed -- scores.xlsx left unmodified")
         except Exception as exc:
             print(f"warning: could not rewrite {scores.name}: {exc}")
 
-    # Learning Suite takes one zip rather than N uploads. Build it last, so it
-    # captures the restored filenames rather than the codes.
-    if renamed:
-        try:
-            from package_feedback import package
-            zip_path, n = package(fb)
-            print(f"Packaged {n} feedback file(s) -> {zip_path.name} "
-                  f"({zip_path.stat().st_size // 1024} KB) for Learning Suite batch upload")
-        except ImportError:
-            print("warning: could not import package_feedback.py -- no batch upload zip created")
-        except Exception as exc:
-            print(f"warning: could not create the batch upload zip: {exc}")
+    # The upload artifacts -- scores_upload.csv and batch_upload.zip -- are not
+    # built here. Every feedback document gets read and often edited before it
+    # goes out, and an artifact built now would be a snapshot of the draft.
+    # sync_scores.py builds both from what you actually approved.
+    print("\nNext: review the feedback documents, then build the upload artifacts from")
+    print("      the reviewed versions:")
+    print(f"      python sync_scores.py {fb.parent} --apply --zip")
 
     if orphans:
         print(f"\n  UNMATCHED ({len(orphans)}) -- left as-is:")
@@ -473,6 +666,9 @@ def main():
     m.add_argument("submissions_dir", type=Path)
     m.add_argument("--out", type=Path, help="where masked copies go (default: ../masked)")
     m.add_argument("--roster", type=Path, help="crosswalk path (default: ../roster.json)")
+    m.add_argument("--ledger", type=Path, help="grading state (default: ../ledger.json)")
+    m.add_argument("--fresh", action="store_true",
+                   help="ignore an existing roster and start the assignment over")
     m.add_argument("--band", type=float, default=6.0,
                    help="percent of page height to black out on scans (default: 6)")
     m.add_argument("--no-redact", action="store_true",

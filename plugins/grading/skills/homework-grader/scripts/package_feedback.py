@@ -9,8 +9,9 @@ uploading them one at a time. The zip is written *into* the feedback folder,
 so it excludes itself and any earlier copy -- otherwise each run would nest
 the previous upload inside the next one.
 
-anonymize.py unmask calls this automatically once names are restored. Run it
-by hand if you graded without de-identifying, or after editing feedback.
+sync_scores.py calls this once you have reviewed the documents. Nothing builds
+it earlier: the zip is what reaches students, so it is made from the reviewed
+versions rather than the draft.
 """
 
 import argparse

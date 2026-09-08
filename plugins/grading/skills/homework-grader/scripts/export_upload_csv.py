@@ -2,7 +2,7 @@
 """Export scores.xlsx as the CSV Learning Suite's grade import accepts.
 
 Usage:
-    export_upload_csv.py <scores.xlsx> [--assignment TITLE] [--out FILE]
+    export_upload_csv.py <scores.xlsx> [--assignment TITLE] [--out FILE] [--only IDS]
 
 Learning Suite wants a minimal sheet: "Net ID" in the top-left cell, the
 assignment title in the cell to its right, and one row per student. Both
@@ -14,10 +14,14 @@ student who does not exist.
 Scores are written as plain numbers. Learning Suite accepts General, Number,
 Percent, or Text and rejects anything else, so no formatting is applied.
 
+`--only` restricts the export to the students named, which is how a later
+round uploads just the work it graded. Re-importing the whole class would
+overwrite any score you had since adjusted inside Learning Suite itself.
+
 Reads the *cached* value of each Total formula, which means scores.xlsx must
-have been recalculated first. anonymize.py unmask does that and then calls
-this; run it again by hand after adjusting a score, since the CSV is a
-snapshot rather than a live view.
+have been recalculated first. sync_scores.py recalculates and then calls this;
+run it again by hand after adjusting a score, since the CSV is a snapshot
+rather than a live view.
 """
 
 import argparse
@@ -51,8 +55,12 @@ def find_columns(ws):
     return None, None, None
 
 
-def export(scores_path, assignment=None, out=None):
-    """Write the upload CSV. Returns (path, row_count, skipped_rows)."""
+def export(scores_path, assignment=None, out=None, only=None):
+    """Write the upload CSV. Returns (path, row_count, skipped_rows).
+
+    `only` is an optional collection of Net IDs (or masked codes); every other
+    student row is left out.
+    """
     import openpyxl
 
     scores_path = Path(scores_path).expanduser().resolve()
@@ -71,6 +79,7 @@ def export(scores_path, assignment=None, out=None):
         assignment = (str(title).strip() if title and header_row > 1
                       else scores_path.parent.name)
 
+    keep = {str(k).strip().lower() for k in only} if only is not None else None
     rows, skipped, blank_totals = [], [], 0
     for r in range(header_row + 1, ws.max_row + 1):
         netid = ws.cell(r, netid_col).value
@@ -79,6 +88,8 @@ def export(scores_path, assignment=None, out=None):
             continue
         netid = str(netid).strip()
         if NON_STUDENT.match(netid):
+            continue
+        if keep is not None and netid.lower() not in keep:
             continue
         # A Total written by openpyxl and never recalculated reads back as None,
         # not as the formula text -- the cached value simply is not there.
@@ -93,6 +104,9 @@ def export(scores_path, assignment=None, out=None):
         rows.append([netid, int(score) if float(score).is_integer() else score])
 
     if not rows:
+        if keep is not None and not blank_totals:
+            raise ValueError(f"none of the requested students have a row in "
+                             f"{scores_path.name}")
         if blank_totals:
             raise ValueError(
                 f"{scores_path.name} has {blank_totals} student row(s) whose Total is a "
@@ -114,9 +128,11 @@ def main():
     ap.add_argument("scores", type=Path)
     ap.add_argument("--assignment", help="column header (default: the sheet's title cell)")
     ap.add_argument("--out", type=Path, help=f"output path (default: {DEFAULT_NAME} beside scores)")
+    ap.add_argument("--only", help="comma-separated Net IDs to include (default: all)")
     args = ap.parse_args()
+    only = [s for s in args.only.split(",") if s.strip()] if args.only else None
     try:
-        out, n, skipped = export(args.scores, args.assignment, args.out)
+        out, n, skipped = export(args.scores, args.assignment, args.out, only)
     except Exception as exc:
         sys.exit(f"error: {exc}")
     print(f"Wrote {out} -- {n} student row(s)")
