@@ -7,6 +7,8 @@ description: |
 
   Also use it for the step *after* grading, when the user has finished reviewing the feedback documents and wants the spreadsheet and upload files rebuilt from them: "finalize 01_head", "sync the scores", "I'm done reviewing", "rebuild the upload files", "I changed some scores", "update the summary from the feedback docs". That is Phase 6, and it runs on its own — skip straight to it rather than regrading anything.
 
+  And for the write-up afterwards: "debrief 01_head", "how did the class do", "where did students struggle", "was anything wrong with the assignment", "what should I fix before next year". That is Phase 7, also on its own.
+
   Works for any course that provides a `course.yml` manifest in its instructor repo (CE 544, CE 547, CCE 270). The assignment changes every time — the workflow and output formatting stay consistent.
 ---
 
@@ -385,6 +387,56 @@ It also stamps each student's round into the **Round** column of `scores.xlsx`, 
 It refuses to build the zip while any document contradicts itself, since that zip is what reaches students.
 
 The upload artifacts are snapshots. Any later edit to a document or a score means running this again — tell the user that, since they will keep editing after the first pass.
+
+---
+
+## Phase 7: Debrief
+
+Once the scores are final, write the instructor a prose account of how the assignment went — where students struggled, and where the *assignment* is at fault rather than the students. You have just read every submission against the rubric, which is the only moment that view exists.
+
+Triggered by "debrief 01_head", "how did the class do", "where did students struggle", "what should I fix before next year". Like Phase 6 it runs on its own and skips the Phase 0 preflight — it reads the assignment markdown for wording, and nothing that could be stale in a way that matters.
+
+### Get the numbers first
+
+```bash
+python "${CLAUDE_PLUGIN_ROOT}/skills/homework-grader/scripts/debrief_stats.py" <assignment>
+```
+
+Per rubric item: mean, share of points lost, and the thing the debrief turns on — whether the strong students missed it too. An item that costs real points but that the top half missed about as often as the bottom half is not measuring understanding, and the instruction is the first suspect. One that tracks the rest of the score is genuinely hard.
+
+The script says where to look. It never says why. Read the feedback documents and `work/grading_results.json` to find out what students actually did, and treat a "SUSPECT THE WORDING" reading as a question to answer, not a finding to repeat.
+
+It withholds the signal under about eight students, or when the rubric has too few items to compare against. When it does, say the class was too small to tell rather than reasoning from the numbers anyway.
+
+### What to write
+
+1. **How it went** — the distribution, and which items cost the most points.
+2. **Where students struggled** — the specific misconception, with a count. "Fourteen of thirty-eight measured head from the well screen rather than the datum" teaches you something; "students found Part 2 difficult" does not.
+3. **Where the assignment is at fault** — a rubric item nearly everyone lost the same way; students splitting into two readings of one instruction; correct work in a format the assignment never asked for clearly; a step the background reading never covered; a rubric line that doesn't match what the problem asks.
+4. **Proposed wording** — quote the sentence as it stands and write the one that would replace it. Do not edit the content repo; the user decides whether to take it.
+
+### The bar
+
+Every claim about the assignment names the specific misconception and quotes the instruction that invited it. Without both it is noise, and noise about your own course material is worse than silence.
+
+**An assignment that worked is a valid finding.** Report the items that did their job and say so plainly. Do not manufacture defects to look useful — a debrief that finds a problem in every assignment stops being read.
+
+Distinguish what you can support from what you suspect. If a pattern shows up in four submissions out of forty, say four out of forty.
+
+### Privacy
+
+Aggregate only. No names, no NetIDs, no per-student narratives, no quotes long enough to identify anyone. In a class of twelve, "one student wrote…" is identifying — report patterns and counts, not individuals.
+
+### Where it goes
+
+Two copies, because the workspace is organized by term and you will not open `2026-fall/` again when you next teach this:
+
+- `<assignment>/debrief.md` in the workspace
+- `debrief.md` in the key folder beside `key.md`, in the instructor repo
+
+The second is written fresh as aggregate prose. Nothing that was ever a student record is copied into a repo, and the rule against that still stands.
+
+**Always tell the user both paths.** They are agreeing to a file in their instructor repo, so say where it landed and that it needs committing — do not commit it yourself.
 
 ---
 

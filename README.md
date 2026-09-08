@@ -310,6 +310,39 @@ The CSV and zip cover only the round just graded. It refuses to build the zip wh
 
 ---
 
+## Debriefing an Assignment
+
+Once the scores are final:
+
+```
+debrief 01_head
+```
+
+You get a prose write-up of how the assignment went: the distribution, where students struggled, and — the part worth having — where the *assignment* is at fault rather than the students.
+
+That distinction rests on a number rather than an impression. For each rubric item the grader checks whether the strong students missed it too, ranking the class by everything *except* that item so it can't place students in its own halves. An item that costs real points but that the top half missed about as often as the bottom half isn't measuring understanding, and the instruction is the first suspect:
+
+```
+  Rubric item        max   mean   lost   top½   bot½      r   reading
+  P3                   8    6.4    20%    91%    70%   0.74   genuinely hard, or under-taught
+  P5                  10    6.0    40%    61%    59%   0.02   SUSPECT THE WORDING
+```
+
+The numbers say where to look. What went wrong comes from reading the feedback documents, so every claim in the debrief names the specific misconception and quotes the instruction that invited it — "fourteen of thirty-eight measured head from the well screen rather than the datum", not "students found Part 2 hard". Where the wording is at fault it drafts the replacement sentence for you to take or reject; it never edits the content repo.
+
+Under about eight students it says the class was too small to tell rather than reporting noise. And an assignment that worked is a valid finding — it's meant to say so, not to manufacture a problem every time.
+
+**It writes two copies:**
+
+```
+~/grading/ce544/2026-fall/01_head/debrief.md     with the rest of the grading
+~/python_projects/ce544_private/keys/unit1/01_head/debrief.md
+```
+
+The second is the one that matters. The workspace is organized by term, so you'd never open `2026-fall/` again — but you will open the key folder the next time you teach this. It holds aggregate statistics and no student data, and it's written fresh rather than copied out of the workspace, so nothing that was ever a student record enters a repo. It arrives uncommitted; committing it is yours.
+
+---
+
 ## Where Guidance Lives
 
 Four tiers, most specific wins:
@@ -364,6 +397,7 @@ grading_tools/
             ├── anonymize.py             mask / unmask, and diff later downloads
             ├── redact_scan.py           black out the header band on scans
             ├── sync_scores.py           feedback docs -> scores.xlsx -> uploads
+            ├── debrief_stats.py         per-item stats for the debrief
             ├── recalc.py                recalculate xlsx formulas
             ├── package_feedback.py      build feedbackN/batch_upload.zip
             └── export_upload_csv.py     build scores_uploadN.csv

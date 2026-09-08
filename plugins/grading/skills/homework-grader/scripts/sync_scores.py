@@ -244,11 +244,16 @@ def ensure_round_column(ws, layout):
     return col
 
 
-def load_scores(path):
-    """Index scores.xlsx by identity. Returns (workbook, sheet, layout)."""
+def load_scores(path, data_only=False):
+    """Index scores.xlsx by identity. Returns (workbook, sheet, layout).
+
+    data_only=True reads the cached values instead of the formulas, which is
+    what anything analyzing the scores wants and what writing them back must
+    never use -- saving a data_only workbook discards every formula in it.
+    """
     import openpyxl
 
-    wb = openpyxl.load_workbook(path)
+    wb = openpyxl.load_workbook(path, data_only=data_only)
     ws = wb.active
 
     header_row = netid_col = total_col = None
