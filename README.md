@@ -185,7 +185,20 @@ Round 2's work lands in its own folders, so review means reading the three late 
 ├── feedback2/          ← the only documents to read this time
 ├── scores_upload1.csv  round 1's import, already done
 ├── scores_upload2.csv  ← the only students to import this time
+├── round2_summary.txt  who was new, and whose grade is changing
 └── scores.xlsx         the whole class, with a Round column
+```
+
+`round2_summary.txt` is the one to read first. The folder shows who was graded; it can't show why, and a student who resubmitted is not the same as a new one — their grade is already posted, so their row is a correction to something they have seen:
+
+```
+Round 2 — graded 8 Sep 2026
+
+NEW (1) — first submission from this student
+  Park, Rui (rpark3)     submitted 7 Sep 23:14
+
+RESUBMITTED (1) — already graded and uploaded; these scores are changing
+  Ngo, Alex (ango7)      was 1 Sep 10:02, now 7 Sep 22:40
 ```
 
 Then `finalize 01_head` again. It reconciles `scores.xlsx` across every round — one workbook for the class, with a **Round** column recording who was graded when — and writes upload artifacts covering only the round just graded. Importing all forty students again would overwrite any score you had adjusted inside Learning Suite since the first upload; `--round all` exports everyone if you ever want that.
@@ -276,6 +289,7 @@ It:
 2. replaces the code *inside* each document with `First Last (netid)`
 3. turns codes in `scores.xlsx` into NetIDs and fills the First/Last Name columns
 4. recalculates `scores.xlsx` — rewriting it clears the cached formula values, so skipping this leaves every total blank
+5. writes `round<N>_summary.txt` — who this round covered, and whose grade is being corrected rather than posted for the first time
 
 Safe to run again on a later round: documents restored earlier are recognized and left alone.
 

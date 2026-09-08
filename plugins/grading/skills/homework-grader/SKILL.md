@@ -42,6 +42,7 @@ Every assignment gets one folder, and it has a fixed shape:
 ├── submissions2/         a later download -- late work, resubmissions
 ├── feedback2/            what round 2 graded -- the only docs to review
 ├── scores_upload2.csv    round 2's grade import
+├── round2_summary.txt    who round 2 covered, and who already had a grade
 ├── masked/               de-identified copies you actually grade
 │   └── TO_GRADE.txt      what this round needs; ignore the rest
 ├── work/                 everything you generate to do the grading
@@ -333,6 +334,8 @@ python "${CLAUDE_PLUGIN_ROOT}/skills/homework-grader/scripts/anonymize.py" unmas
 ```
 
 Feedback files are renamed to `last_first_netid_userfilename_FEEDBACK.docx`, the code inside each document body becomes `First Last (netid)`, and in `scores.xlsx` the codes become NetIDs with the First Name and Last Name columns filled in. Rewriting `scores.xlsx` clears the cached formula values, so `unmask` recalculates it for you — if it reports that LibreOffice is missing, run `recalc.py` yourself or every total will read as blank.
+
+It also writes `round<N>_summary.txt` at the assignment root, naming who this round covered and which of them already had a grade posted. The feedback folder shows *who* was graded and cannot show *why* — a resubmitting student looks identical to a new one in it, and the difference matters, since their grade is already posted and this round is a correction to something they have seen. Point the user at that file. It sits outside the feedback folder because everything inside one goes into the batch upload zip.
 
 Running it again is safe. On a later batch the feedback folder holds a mix — documents restored last round carry real names, this round's carry codes — and the script recognizes the restored ones and leaves them alone.
 

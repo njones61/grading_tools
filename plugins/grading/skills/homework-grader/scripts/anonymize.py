@@ -445,11 +445,18 @@ def mask(args):
         for name, _ in renames:
             by_name.pop(name, None)
         for r in recs:
-            by_name[r["masked"]] = {
+            prior = by_name.get(r["masked"], {})
+            rec = {
                 "masked": r["masked"], "sha256": r["sha256"],
                 "submitted": datetime.fromtimestamp(r["submitted"]).isoformat(timespec="seconds"),
-                "batch": src.name,
+                "batch": src.name, "round": rnd, "change": r["status"],
             }
+            if r["status"] == "resubmitted" and prior.get("submitted"):
+                rec["previous_submitted"] = prior["submitted"]
+            elif r["status"] == "unchanged":
+                # Keep the round that first graded it, not the one that saw it again.
+                rec["round"] = prior.get("round", rnd)
+            by_name[r["masked"]] = rec
         entry["files"] = [by_name[k] for k in sorted(by_name)]
         if code in regrade:
             entry["status"] = "needs_grading"
@@ -539,6 +546,78 @@ def mask(args):
         print("  Nothing to grade: every file in this batch was graded in an earlier round.")
     print("  Grade the masked copies. Do not commit the crosswalk to git.\n")
     return 1 if (unparsed or errors) else 0
+
+
+FEEDBACK_DIR = re.compile(r"^feedback[_-]?(\d+)?$")
+
+CHANGE_SECTIONS = [
+    ("new", "NEW", "first submission from this student"),
+    ("resubmitted", "RESUBMITTED",
+     "already graded and uploaded; these scores are changing"),
+    ("added", "ADDED", "a new file alongside one already graded"),
+]
+
+
+def pretty(iso):
+    """An ISO timestamp as something you would say out loud."""
+    try:
+        return datetime.fromisoformat(iso).strftime("%-d %b %H:%M")
+    except (TypeError, ValueError):
+        return iso or "unknown"
+
+
+def write_round_summary(fb, by_code, rnd):
+    """Say who this round covered, and which of them already had a grade posted.
+
+    The feedback folder shows who was graded; it cannot show why. A student
+    who resubmitted looks exactly like a new one there, and the difference
+    matters -- their grade is already posted, so this round is a correction to
+    something they have seen. Written at the assignment root rather than inside
+    the feedback folder, because everything in that folder goes into the zip.
+    """
+    ledger_path = fb.parent / "ledger.json"
+    if not ledger_path.exists():
+        return None
+    try:
+        ledger = json.loads(ledger_path.read_text())
+    except Exception:
+        return None
+
+    # code -> its strongest change this round, and the timestamps behind it.
+    found = {}
+    for code, entry in ledger.get("students", {}).items():
+        for rec in entry.get("files", []):
+            if rec.get("round") != rnd or rec.get("change") == "unchanged":
+                continue
+            rank = {"new": 3, "resubmitted": 2, "added": 1}.get(rec.get("change"), 0)
+            if rank > found.get(code, (0,))[0]:
+                found[code] = (rank, rec)
+    if not found:
+        return None
+
+    lines = [f"Round {rnd} -- graded {datetime.now().strftime('%-d %b %Y')}", ""]
+    for change, heading, note in CHANGE_SECTIONS:
+        rows = [(code, rec) for code, (_, rec) in sorted(found.items())
+                if rec.get("change") == change]
+        if not rows:
+            continue
+        who = []
+        for code, rec in rows:
+            st = by_code.get(code)
+            name = (f"{st['last']}, {st['first']} ({st['netid']})" if st else code)
+            when_txt = f"submitted {pretty(rec.get('submitted'))}"
+            if rec.get("previous_submitted"):
+                when_txt = (f"was {pretty(rec['previous_submitted'])}, "
+                            f"now {pretty(rec.get('submitted'))}")
+            who.append((name, when_txt))
+        width = max(len(n) for n, _ in who)
+        lines.append(f"{heading} ({len(who)}) -- {note}")
+        lines += [f"  {n.ljust(width)}   {w}" for n, w in who]
+        lines.append("")
+
+    out = fb.parent / f"round{rnd}_summary.txt"
+    out.write_text("\n".join(lines))
+    return out, sum(1 for _ in found)
 
 
 def unmask(args):
@@ -640,6 +719,18 @@ def unmask(args):
             print("warning: openpyxl not installed -- scores.xlsx left unmodified")
         except Exception as exc:
             print(f"warning: could not rewrite {scores.name}: {exc}")
+
+    m = FEEDBACK_DIR.match(fb.name)
+    rnd = int(m.group(1) or 1) if m else 1
+    try:
+        summary = write_round_summary(fb, by_code, rnd)
+    except Exception as exc:
+        summary = None
+        print(f"warning: could not write the round summary: {exc}")
+    if summary:
+        out, n = summary
+        print(f"\nWrote {out.name} -- what round {rnd} covered, and who already had "
+              f"a grade posted")
 
     # The upload artifacts -- scores_upload.csv and batch_upload.zip -- are not
     # built here. Every feedback document gets read and often edited before it
