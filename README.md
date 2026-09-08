@@ -29,13 +29,32 @@ Claude Code clones this repo with your existing `gh` credentials, so a private r
 "enabledPlugins": { "grading@grading_tools": true }
 ```
 
-To pick up later changes:
+### Updating later
+
+Two steps, and both are needed:
 
 ```
 /plugin marketplace update grading_tools
+/plugin update grading@grading_tools
 ```
 
-Use `marketplace update`. `/plugin update grading` opens the plugin browser without updating anything.
+Then apply it to the running session:
+
+```
+/reload-plugins
+```
+
+Restart Claude Code if that doesn't pick it up.
+
+The first command refreshes the catalog; the second refreshes the copy you actually run. Doing only the first leaves you on whatever you installed originally, with the marketplace sitting current beside it. That is what happened to everyone between v1.5.0 and v2.0.0.
+
+To see which version you are on:
+
+```bash
+ls ~/.claude/plugins/cache/grading_tools/grading/
+```
+
+The cache keeps every version ever installed, so more than one directory here is normal; the skill runs from the newest.
 
 ### 2. Check out the repos side by side
 
@@ -391,6 +410,29 @@ Tier 3 is deliberately not per-course: CCE 270 and CE 544 both assign Python, an
 - **Never pull over uncommitted changes.** The preflight refuses to, and so should you.
 
 ---
+
+## Releasing a New Version
+
+**Bump `version` in `plugins/grading/.claude-plugin/plugin.json` on every release.** Users are pinned to the version they installed, so an unchanged version string means nobody gets the change — the marketplace updates, the installed copy does not, and the only symptom is that a documented feature appears not to exist.
+
+Use semver against the *user's* workflow: a bump to the minor version for new capability, to the major for anything that changes what they do by hand or removes an artifact they relied on. v2.0.0 was major because `unmask` stopped producing the upload zip and CSV.
+
+After committing the bump:
+
+```bash
+claude plugin validate .
+claude plugin tag plugins/grading --push
+```
+
+`validate` checks the marketplace manifest. `tag` creates `grading--v<version>`, refusing if `plugin.json` and the marketplace entry disagree or the tree is dirty — which is the check that would have caught this being forgotten.
+
+Then tell people to run both update commands and `/reload-plugins`.
+
+### Why not drop the version field entirely
+
+Claude Code falls back to the commit SHA when `plugin.json` declares no `version`, so every push would reach everyone with no bump to remember — which would make the failure above impossible.
+
+The cost is that the install cache is then named by SHA rather than by version. The `$GT` lookup below picks the newest directory with `sort -V`, which is meaningful for `2.0.0` and meaningless for a hash, and there would be no version number to ask a colleague for when something goes wrong. Explicit versions stay, and `claude plugin tag` guards the bump.
 
 ## Adding a Course
 
