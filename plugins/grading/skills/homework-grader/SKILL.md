@@ -82,7 +82,13 @@ Run the preflight script, giving it the instructor repo containing `course.yml`:
 python "${CLAUDE_PLUGIN_ROOT}/skills/homework-grader/scripts/preflight_sync.py" /path/to/course_private
 ```
 
-It resolves `course.yml`, then for every repo it names: fetches, and reports whether the tree is clean, and whether it is behind, ahead, or diverged from its remote.
+It checks two things, and either one stops the run.
+
+**Dependencies first.** Every tool the pipeline shells out to — openpyxl, python-docx, Pillow, pypdf, poppler, LibreOffice, the `docx` npm package — is verified before a repo is even fetched. Missing ones are reported together with the install command and the phase that would have hit them. Nothing proceeds until they are installed.
+
+That check exists because two of these fail in ways that resemble success. Without the redaction stack, a scanned submission is copied through with the student's handwritten name still on the page, reported in the same list a healthy run fills with born-digital PDFs. Without LibreOffice, every Total in `scores.xlsx` comes out blank — at Phase 5, after the whole class has been graded.
+
+**Then the repos.** For every repo `course.yml` names: fetches, and reports whether the tree is clean, and whether it is behind, ahead, or diverged from its remote.
 
 Interpreting the result:
 
@@ -92,6 +98,7 @@ Interpreting the result:
 | Clean but behind | Run with `--pull` to fast-forward, then proceed. |
 | Dirty (uncommitted changes) | **Stop.** Report which files. Ask the user to commit or stash. Never pull over uncommitted work. |
 | Ahead or diverged | **Stop.** Report it. The user may have unpushed rubric edits, or someone else pushed conflicting changes. This needs a human. |
+| Missing dependencies | **Stop.** Give the user the install commands it printed. Do not grade around it. |
 
 Never work around a failed preflight by reading files anyway. A stale rubric silently produces wrong scores for the whole class — that is far worse than stopping to ask.
 
@@ -285,8 +292,11 @@ A student is regraded whole. If one of their three files changed, all three come
 Read the report the script prints. Three categories need your attention:
 
 - **COULD NOT PARSE** — filenames that don't match `last_first_netid_...`. These are *not* copied. Tell the user; they usually need renaming by hand.
+`mask` re-checks the redaction stack itself before copying anything, since it can be run by hand without the preflight. A batch containing scans it cannot redact is refused outright, with nothing written.
+
 - **REDACTED** — scanned PDFs and images whose header band was blacked out. This is destructive: the page is rasterized, the band is painted onto the bitmap, the PDF is rebuilt, and the scanner's OCR text layer goes with it. Tell the user to look at the previews in `masked/redaction_previews/` before you start grading — the band is geometric, not a name detector, so a name written down a margin or on a later page survived it. Adjust with `--band <percent>`, or turn it off with `--no-redact`.
-- **UNSCRUBBABLE** — scans that could not be redacted, and born-digital PDFs, which are skipped because rasterizing would destroy their selectable text. The filename is masked but the content may still show a name. Report it so the user knows which submissions remain identifying.
+- **WITHHELD** — files whose redaction was attempted and failed. These are **not** in `masked/`, deliberately: handing over a scan with the student's name still on it would defeat the masking, and a line in a report is not a safeguard. Tell the user which files, and that the rest of the batch graded normally without them.
+- **UNSCRUBBABLE** — born-digital PDFs, which are skipped because rasterizing would destroy their selectable text, and anything passed through by `--no-redact`. The filename is masked but the content may still show a name. Report it so the user knows which submissions remain identifying.
 
 Detection is deliberately local. Sending a page to a vision model to find the name would transmit the very thing the redaction exists to withhold, so the band is a fixed fraction of page height rather than anything adaptive.
 

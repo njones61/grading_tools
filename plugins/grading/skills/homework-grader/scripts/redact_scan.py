@@ -46,6 +46,40 @@ UNSUPPORTED_EXT = {".heic", ".heif"}
 FULL_PAGE_COVERAGE = 0.80
 
 
+# Everything a scan has to pass through. A file with one of these extensions
+# is assumed to carry a name as pixels until redaction proves otherwise.
+REDACTABLE_EXT = PDF_EXT | IMAGE_EXT | UNSUPPORTED_EXT
+
+
+def capabilities():
+    """What is missing from the redaction stack, as [{name, install, why}].
+
+    Every gap here fails the same quiet way if it is not checked up front: the
+    file is copied, the redaction is skipped, and the submission reaches the
+    grader with the student's handwritten name on it. The pypdf gap is the
+    nastiest, because it does not look like a failure -- without page sizes,
+    is_scanned_pdf() cannot measure coverage, returns False, and a genuine
+    scan is filed as a born-digital PDF that never needed redacting.
+    """
+    missing = []
+    try:
+        import PIL  # noqa: F401
+    except ImportError:
+        missing.append({"name": "Pillow", "install": "pip install pillow",
+                        "why": "paints the band and rebuilds the page"})
+    try:
+        import pypdf  # noqa: F401
+    except ImportError:
+        missing.append({"name": "pypdf", "install": "pip install pypdf",
+                        "why": "measures pages -- without it a scan is "
+                               "misread as a born-digital PDF and skipped"})
+    if not shutil.which("pdftoppm") or not shutil.which("pdfimages"):
+        missing.append({"name": "poppler (pdftoppm, pdfimages)",
+                        "install": "brew install poppler",
+                        "why": "rasterizes pages and detects whether a PDF is a scan"})
+    return missing
+
+
 def _pdftoppm():
     return shutil.which("pdftoppm")
 
@@ -110,7 +144,7 @@ def redact_pdf(path, band_pct=DEFAULT_BAND_PCT, dpi=DEFAULT_DPI, preview=True):
 
     exe = _pdftoppm()
     if not exe:
-        return "skipped", "pdftoppm not found (install poppler)"
+        return "error", "pdftoppm not found (install poppler) -- cannot redact"
 
     with tempfile.TemporaryDirectory() as tmp:
         stem = str(Path(tmp) / "pg")
@@ -168,10 +202,10 @@ def redact(path, band_pct=DEFAULT_BAND_PCT, dpi=DEFAULT_DPI, force=False, previe
     try:
         import PIL  # noqa: F401
     except ImportError:
-        return "skipped", "Pillow not installed"
+        return "error", "Pillow not installed -- cannot redact"
 
     if ext in UNSUPPORTED_EXT:
-        return "skipped", f"{ext} needs pillow-heif -- convert it by hand"
+        return "error", f"{ext} needs pillow-heif -- convert it to PDF or JPEG by hand"
     if ext in IMAGE_EXT:
         return redact_image(path, band_pct, preview)
     if ext in PDF_EXT:

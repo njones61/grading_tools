@@ -59,9 +59,13 @@ pip install pillow pypdf             # blacks out the name band on scans
 cd ~/grading && npm install docx     # builds the feedback .docx files
 ```
 
-Install all of them. Missing LibreOffice leaves every total in `scores.xlsx` blank; missing `docx` stops the feedback documents being written at all.
+Check them at any time:
 
-**Pillow, pypdf and poppler matter more than they look.** Redaction is on by default, and without them every scanned submission falls through to UNSCRUBBABLE — masked filename, student's handwritten name still on the page. The report says so, but it says so quietly, in a list you may skim.
+```bash
+python "$GT/check_deps.py" --workspace ~/grading
+```
+
+The Phase 0 preflight runs this before it fetches a repo, and refuses to grade until everything is present. Two of these otherwise fail in ways that look like success: without the redaction stack a scanned submission is copied through with the student's handwritten name still on it, and without LibreOffice every total in `scores.xlsx` comes out blank at Phase 5, once the class has already been graded.
 
 Install `docx` in `~/grading` rather than globally: node resolves `node_modules` by walking up from the script, so one install there covers every course and assignment beneath it.
 
@@ -227,15 +231,15 @@ The cache keeps every version ever installed, so this selects the newest deliber
 
 (Claude Code knows this path as `${CLAUDE_PLUGIN_ROOT}` and resolves it itself. You only need `$GT` when running a step by hand.)
 
-### Phase 0 — Sync preflight
-
-Both repos must be clean and current, or you risk grading against a stale rubric.
+### Phase 0 — Preflight
 
 ```bash
 python "$GT/preflight_sync.py" ~/python_projects/ce544_private --pull
 ```
 
-`--pull` fast-forwards a repo that is clean and merely behind. It **stops** rather than pulling if a repo has uncommitted changes or has diverged — those need you.
+Checks the tooling, then the repos, and stops on either.
+
+Dependencies come first and are reported together, with the install command and the phase each would have broken. Then both repos must be clean and current, or you risk grading against a stale rubric. `--pull` fast-forwards a repo that is clean and merely behind; it **stops** rather than pulling if a repo has uncommitted changes or has diverged — those need you.
 
 ### Phase 1 — Resolve the assignment
 
@@ -411,7 +415,8 @@ grading_tools/
         │   ├── feedback-template.md     docx template
         │   └── scores-template.md       xlsx template
         └── scripts/
-            ├── preflight_sync.py        verify repos clean and in sync
+            ├── preflight_sync.py        verify tooling installed, repos in sync
+            ├── check_deps.py            verify every shelled-out tool is present
             ├── framework.py             stamp / check the cached rubric map
             ├── anonymize.py             mask / unmask, and diff later downloads
             ├── redact_scan.py           black out the header band on scans

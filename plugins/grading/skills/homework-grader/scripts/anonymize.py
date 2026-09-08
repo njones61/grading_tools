@@ -280,8 +280,15 @@ def scrub_json(path, variants, code):
         return 0, str(exc)
 
 
-def scrub_copy(dest, variants, code, do_redact, band, errors, unscrubbable, redacted):
-    """Scrub or redact one masked copy in place, recording what happened."""
+def scrub_copy(dest, variants, code, do_redact, band, errors, unscrubbable, redacted,
+               withheld):
+    """Scrub or redact one masked copy in place, recording what happened.
+
+    A file whose redaction was attempted and failed is deleted rather than left
+    in masked/. Copying it through would put the student's handwritten name in
+    front of the grader with only a line in a report to say so, and a report
+    line is not a safeguard.
+    """
     ext = dest.suffix.lower()
     if ext in OOXML:
         _, err = scrub_ooxml(dest, variants, code)
@@ -307,9 +314,13 @@ def scrub_copy(dest, variants, code, do_redact, band, errors, unscrubbable, reda
         if status == "redacted":
             redacted.append((dest.name, detail))
         elif status == "error":
-            errors.append((dest.name, f"redaction failed: {detail}"))
-            unscrubbable.append(dest.name)
+            # Could not redact. Do not hand it over.
+            dest.unlink(missing_ok=True)
+            withheld.append((dest.name, detail))
         else:
+            # A deliberate skip: a born-digital PDF, or --no-redact. The page
+            # was never going to be rasterized, and that is a documented
+            # trade-off rather than a failure.
             unscrubbable.append(dest.name)
     else:
         unscrubbable.append(dest.name)
@@ -317,6 +328,65 @@ def scrub_copy(dest, variants, code, do_redact, band, errors, unscrubbable, reda
 
 # A file needing to be graded, versus one already accounted for last round.
 NEEDS_GRADING = {"new", "resubmitted", "added"}
+
+
+def check_redaction_stack(files, do_redact):
+    """Refuse to start if this batch has scans and the tooling cannot redact them.
+
+    A missing dependency here does not announce itself. Redaction is skipped,
+    the file is copied anyway, and the run reports it in a list -- the same
+    list a clean run fills with born-digital PDFs, so it reads as normal. The
+    result is a submission that is de-identified in its filename and not at
+    all on the page. That is worse than not running: it looks like the
+    protection happened.
+
+    So this stops before anything is written, names what is missing, and says
+    how to install it.
+    """
+    try:
+        from redact_scan import REDACTABLE_EXT, capabilities
+    except ImportError:
+        REDACTABLE_EXT, capabilities = None, None
+
+    scans = [f for f in files
+             if REDACTABLE_EXT is None or f.suffix.lower() in REDACTABLE_EXT]
+    if not scans:
+        return          # nothing here carries a name as pixels
+
+    if capabilities is None:
+        sys.exit("error: redact_scan.py could not be imported, and this batch has "
+                 f"{len(scans)} file(s) that need redacting.\n"
+                 "       Nothing was copied. Reinstall the plugin, or pass "
+                 "--no-redact to accept unredacted scans.")
+
+    if not do_redact:
+        print(f"\n  --no-redact: {len(scans)} scan(s) will be copied through with the")
+        print("  student's name still on the page. You asked for this; nothing else")
+        print("  in the pipeline removes it.\n")
+        return
+
+    missing = capabilities()
+    if not missing:
+        return
+
+    lines = ["error: this batch has "
+             f"{len(scans)} file(s) that need redacting, and the tooling to do it",
+             "       is incomplete. Nothing was copied.", ""]
+    for m in missing:
+        lines.append(f"       MISSING  {m['name']}")
+        lines.append(f"                {m['why']}")
+        lines.append(f"                {m['install']}")
+        lines.append("")
+    lines += [
+        "       Refusing rather than continuing, because continuing looks like it",
+        "       worked: the filename would be masked, the scan would be copied",
+        "       unredacted, and the student's handwritten name would reach the",
+        "       grader with one line in a report to say so.",
+        "",
+        "       Install the above and run again. To grade unredacted scans",
+        "       deliberately, pass --no-redact.",
+    ]
+    sys.exit("\n".join(lines))
 
 
 def mask(args):
@@ -350,13 +420,15 @@ def mask(args):
     if not files:
         sys.exit(f"error: no submissions found in {src}")
 
+    check_redaction_stack(files, not args.no_redact)
+
     # code -> {masked filename: record} from every earlier round.
     prior_files = {code: {rec["masked"]: rec for rec in st.get("files", [])}
                    for code, st in ledger.get("students", {}).items()}
 
     students = dict(prior)
     used = {s["code"] for s in prior.values()}
-    unparsed, unscrubbable, redacted, errors = [], [], [], []
+    unparsed, unscrubbable, redacted, errors, withheld = [], [], [], [], []
     seen = {}          # code -> set of masked names in this batch
     batch = {}         # code -> list of (file, dest_name, sha, mtime, status)
 
@@ -420,14 +492,19 @@ def mask(args):
                 continue
             shutil.copy2(r["file"], out / r["masked"])
             scrub_copy(out / r["masked"], variants, code, not args.no_redact,
-                       args.band, errors, unscrubbable, redacted)
+                       args.band, errors, unscrubbable, redacted, withheld)
         # Keep the crosswalk's file list a union across rounds -- unmask reads it.
         known = {e["masked"] for e in st["files"]}
         for r in recs:
             if r["masked"] not in known:
                 st["files"].append({"original": r["file"].name, "masked": r["masked"]})
         if code in regrade:
-            to_grade[code] = [r["masked"] for r in recs]
+            # A withheld file was never copied, so it must not be queued --
+            # the grader would go looking for something that is not there.
+            gone = {name for name, _ in withheld}
+            names = [r["masked"] for r in recs if r["masked"] not in gone]
+            if names:
+                to_grade[code] = names
 
     # Files this batch did not include, but earlier rounds did. A file the
     # student renamed is still here under its new name, so it is not missing.
@@ -491,7 +568,8 @@ def mask(args):
         todo.write_text("")
 
     # ---- report ----
-    print(f"\nRound {rnd}: masked {sum(len(v) for v in batch.values())} file(s) for "
+    print(f"\nRound {rnd}: masked "
+          f"{sum(len(v) for v in batch.values()) - len(withheld)} file(s) for "
           f"{len(batch)} student(s) from {src.name}/")
     print(f"  masked copies : {out}")
     print(f"  crosswalk     : {roster_path}  (mode 600)")
@@ -532,6 +610,14 @@ def mask(args):
         for code, name in sorted(missing):
             print(f"      {name}")
         print()
+    if withheld:
+        print(f"  WITHHELD ({len(withheld)}) -- redaction failed, so these were NOT copied")
+        print("  into masked/. The student's name is still on the page, and handing the")
+        print("  file over unredacted would defeat the point of masking it:")
+        for n, why in withheld:
+            print(f"      {n}: {why}")
+        print("  Fix the file, or redact it by hand, then run this again. Grading the")
+        print("  rest of the batch without them is fine -- they are simply not here.\n")
     if unparsed:
         print(f"  COULD NOT PARSE ({len(unparsed)}) -- not copied, handle by hand:")
         for n in unparsed:
@@ -564,7 +650,7 @@ def mask(args):
     else:
         print("  Nothing to grade: every file in this batch was graded in an earlier round.")
     print("  Grade the masked copies. Do not commit the crosswalk to git.\n")
-    return 1 if (unparsed or errors) else 0
+    return 1 if (unparsed or errors or withheld) else 0
 
 
 FEEDBACK_DIR = re.compile(r"^feedback[_-]?(\d+)?$")

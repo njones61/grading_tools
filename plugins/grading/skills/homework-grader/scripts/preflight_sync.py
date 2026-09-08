@@ -1,19 +1,31 @@
 #!/usr/bin/env python3
-"""Verify every repo a course depends on is clean and in sync before grading.
+"""Verify the machine can grade before it starts: tools installed, repos in sync.
 
-Grading reads the assignment and rubric from the public content repo and the
-answer key from the private instructor repo. If either is stale, the whole
-class gets graded against the wrong thing -- silently. This checks first.
+Two ways a grading run goes wrong before it has read a single submission.
+
+The repos can be stale. Grading reads the assignment and rubric from the
+public content repo and the answer key from the private instructor repo, and
+if either is behind, the whole class is graded against the wrong thing --
+silently.
+
+The tools can be missing. Every one of them is otherwise discovered late, and
+two of them fail in ways that resemble success: without the redaction stack a
+scanned submission is copied through with the student's handwritten name
+still on it, and without LibreOffice every Total in scores.xlsx comes out
+blank at Phase 5, once the class has already been graded.
+
+Both are checked here, dependencies first, and either one stops the run.
 
 Usage:
-    preflight_sync.py <instructor_repo_path> [--pull] [--json]
+    preflight_sync.py <instructor_repo_path> [--pull] [--json] [--skip-deps]
 
-    --pull   fast-forward any repo that is clean and merely behind
-    --json   emit machine-readable output instead of a table
+    --pull        fast-forward any repo that is clean and merely behind
+    --json        emit machine-readable output instead of a table
+    --skip-deps   check only the repos (for a phase that shells out to nothing)
 
 Exit codes:
-    0  all repos clean and up to date (or fast-forwarded with --pull)
-    1  at least one repo needs human attention
+    0  tools present, repos clean and up to date (or fast-forwarded with --pull)
+    1  something needs human attention
     2  bad invocation -- missing path, unreadable course.yml
 """
 
@@ -179,6 +191,8 @@ def main():
                     help="fast-forward repos that are clean and behind")
     ap.add_argument("--json", action="store_true", dest="as_json",
                     help="emit JSON instead of a table")
+    ap.add_argument("--skip-deps", action="store_true",
+                    help="check only the repos, not the installed tooling")
     args = ap.parse_args()
 
     instructor_path = args.instructor_repo.expanduser().resolve()
@@ -186,6 +200,25 @@ def main():
         sys.exit(f"error: no such directory: {instructor_path}")
 
     course = load_course(instructor_path)
+
+    # Tooling first. A missing dependency stops the run whatever the repos say,
+    # and it is the cheaper check.
+    missing = []
+    if not args.skip_deps:
+        try:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from check_deps import check as check_tools, report as report_tools
+            missing = check_tools(course.get("grading_workspace"))
+        except ImportError:
+            missing = [{"name": "check_deps.py", "install": "reinstall the plugin",
+                        "why": "could not be imported", "phase": "0"}]
+        if missing and not args.as_json:
+            print(f"\n{course.get('course', 'course')} — preflight\n")
+            print(report_tools(missing))
+            print("NOT READY — install the above before grading. The repos were not "
+                  "checked.\n")
+            return 1
+
     targets = repos_from(course, instructor_path)
     if not targets:
         sys.exit("error: course.yml declares no repos")
@@ -204,12 +237,15 @@ def main():
     if args.as_json:
         print(json.dumps({
             "course": course.get("course"),
+            "missing_dependencies": missing,
             "repos": results,
-            "ready": not (blocked or stale),
+            "ready": not (blocked or stale or missing),
         }, indent=2))
-        return 1 if (blocked or stale) else 0
+        return 1 if (blocked or stale or missing) else 0
 
-    print(f"\n{course.get('course', 'course')} — sync preflight\n")
+    print(f"\n{course.get('course', 'course')} — preflight\n")
+    if not args.skip_deps:
+        print("  dependencies   all present\n")
     for label, r in results.items():
         print(f"  {MARK[r['state']]:<12} {label:<11} {r['detail']}")
         print(f"  {'':<12} {'':<11} {r['path']}")
