@@ -47,6 +47,11 @@ IMPORTANT LIMITS -- read the report `mask` prints:
   * Scrubbing is best-effort text replacement. It catches a name typed into
     a spreadsheet cell or a notebook markdown cell; it will not catch a name
     embedded in a chart image or a screenshot pasted into a workbook.
+  * The variants come from the roster, which holds the legal name. Common
+    diminutives are covered (a roster "Thomas" catches "Tom") and accents are
+    matched loosely in both directions ("Jose" finds "Jose"), but a preferred
+    name that cannot be derived from the legal one -- Wei-Ling going by Cindy
+    -- is beyond any table. Nothing here claims a file came out clean.
 De-identification reduces exposure. It does not by itself resolve whether
 sending student work to a given service is permitted -- that is a question
 for your institution's registrar or FERPA officer.
@@ -61,6 +66,7 @@ import secrets
 import shutil
 import stat
 import sys
+import unicodedata
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -114,13 +120,120 @@ def new_code(used):
             return code
 
 
+# Diminutives, so a roster "Thomas" still catches a page that says "Tom".
+# Read both ways: either side of a pair pulls in the other. Anglo-centric by
+# construction and nowhere near complete -- a student whose preferred name is
+# not derivable from their legal one is beyond any table, which is why the
+# report never claims a file came out clean.
+DIMINUTIVES = [
+    ("abigail", "abby"), ("alexander", "alex"), ("alexandra", "alex"),
+    ("andrew", "andy"), ("andrew", "drew"), ("anthony", "tony"),
+    ("benjamin", "ben"), ("bradley", "brad"), ("catherine", "kate"),
+    ("catherine", "cathy"), ("charles", "charlie"), ("charles", "chuck"),
+    ("christopher", "chris"), ("daniel", "dan"), ("daniel", "danny"),
+    ("david", "dave"), ("deborah", "debbie"), ("douglas", "doug"),
+    ("edward", "ed"), ("edward", "eddie"), ("elizabeth", "liz"),
+    ("elizabeth", "beth"), ("emily", "em"), ("frederick", "fred"),
+    ("gregory", "greg"), ("jacob", "jake"), ("james", "jim"),
+    ("james", "jamie"), ("jeffrey", "jeff"), ("jennifer", "jen"),
+    ("jennifer", "jenny"), ("jonathan", "jon"), ("joseph", "joe"),
+    ("joshua", "josh"), ("katherine", "kate"), ("katherine", "katie"),
+    ("kenneth", "ken"), ("lawrence", "larry"), ("madeline", "maddie"),
+    ("margaret", "maggie"), ("margaret", "peggy"), ("matthew", "matt"),
+    ("megan", "meg"), ("michael", "mike"), ("nathaniel", "nate"),
+    ("nicholas", "nick"), ("patricia", "pat"), ("patrick", "pat"),
+    ("peter", "pete"), ("philip", "phil"), ("rebecca", "becca"),
+    ("richard", "rick"), ("richard", "dick"), ("robert", "bob"),
+    ("robert", "rob"), ("ronald", "ron"), ("samuel", "sam"),
+    ("stephen", "steve"), ("steven", "steve"), ("susan", "sue"),
+    ("theodore", "ted"), ("thomas", "tom"), ("timothy", "tim"),
+    ("victoria", "vicky"), ("william", "will"), ("william", "bill"),
+    ("zachary", "zach"),
+    # -y forms and a few the list above skipped entirely.
+    ("thomas", "tommy"), ("james", "jimmy"), ("robert", "bobby"),
+    ("william", "billy"), ("john", "johnny"), ("john", "jack"),
+    ("ronald", "ronnie"), ("albert", "al"), ("alfred", "al"),
+    ("arthur", "art"), ("harold", "harry"), ("henry", "hank"),
+    ("raymond", "ray"), ("russell", "russ"), ("stanley", "stan"),
+    ("vincent", "vince"), ("walter", "walt"), ("eugene", "gene"),
+    ("leonard", "len"), ("howard", "howie"), ("gabriel", "gabe"),
+    ("dominic", "dom"), ("maxwell", "max"), ("oliver", "ollie"),
+    ("sophia", "sophie"), ("isabella", "bella"), ("natalie", "nat"),
+    ("olivia", "liv"), ("samantha", "sam"), ("cassandra", "cassie"),
+    ("veronica", "roni"), ("terrence", "terry"), ("matthew", "matty"),
+    ("joseph", "joey"),
+]
+
+_NICKNAMES = {}
+for _a, _b in DIMINUTIVES:
+    _NICKNAMES.setdefault(_a, set()).add(_b)
+    _NICKNAMES.setdefault(_b, set()).add(_a)
+
+# Two-letter names that are also ordinary English words. Scrubbing "An" out of
+# a submission would replace every article on the page, so the bare token is
+# left alone -- the surname still catches the full name.
+SHORT_WORDS = {
+    "an", "as", "at", "be", "by", "do", "go", "he", "if", "in", "is", "it",
+    "me", "my", "no", "of", "on", "or", "so", "to", "up", "us", "we", "am",
+}
+
+
+def fold(s):
+    """Strip diacritics: Jos\u00e9 -> Jose."""
+    return "".join(c for c in unicodedata.normalize("NFKD", s)
+                   if not unicodedata.combining(c))
+
+
 def name_variants(last, first, netid):
     """Strings worth scrubbing from file contents, longest first."""
-    out = {
-        f"{first} {last}", f"{last}, {first}", f"{first}{last}",
-        f"{last} {first}", last, first, netid,
-    }
-    return sorted({v for v in out if len(v) >= 3}, key=len, reverse=True)
+    firsts = {first} | {n for n in _NICKNAMES.get(first.lower(), set())}
+    out = {netid}
+    for f in firsts:
+        out |= {f"{f} {last}", f"{last}, {f}", f"{f}{last}", f"{last} {f}", f}
+    out.add(last)
+
+    keep = set()
+    for v in out:
+        if len(v) < 2:
+            continue
+        if len(v) == 2 and fold(v).lower() in SHORT_WORDS:
+            continue
+        keep.add(v)
+    return sorted(keep, key=len, reverse=True)
+
+
+def _accent_classes():
+    """Unaccented letter -> every letter that folds to it. 'e' -> eeeee..."""
+    equiv = {}
+    for cp in range(0x00C0, 0x0250):        # Latin-1 Supplement + Extended-A/B
+        ch = chr(cp)
+        f = fold(ch)
+        if len(f) == 1 and f.isalpha() and f.lower() != ch.lower():
+            equiv.setdefault(f.lower(), set()).add(ch)
+    return equiv
+
+
+ACCENTS = _accent_classes()
+
+
+def _accent_insensitive(v):
+    """Escape a variant so each letter also matches its accented forms.
+
+    Students type their own name without the accent constantly, and the roster
+    carries it -- so 'Jose' on the page has to match 'Jos\u00e9' in the crosswalk, and
+    the reverse when the roster is the plain one. Folding both sides would be
+    simpler, but the replacement has to land on the original text, so the
+    tolerance goes into the pattern instead.
+    """
+    parts = []
+    for ch in v:
+        base = fold(ch).lower()
+        alts = ACCENTS.get(base)
+        if alts and ch.isalpha():
+            parts.append("[" + re.escape("".join(sorted({base, ch.lower()} | alts))) + "]")
+        else:
+            parts.append(re.escape(ch))
+    return "".join(parts)
 
 
 def compile_variants(variants):
@@ -134,7 +247,7 @@ def compile_variants(variants):
     for v in variants:
         lead = r"\b" if v[0].isalnum() else ""
         tail = r"\b" if v[-1].isalnum() else ""
-        out.append(re.compile(lead + re.escape(v) + tail, re.IGNORECASE))
+        out.append(re.compile(lead + _accent_insensitive(v) + tail, re.IGNORECASE))
     return out
 
 

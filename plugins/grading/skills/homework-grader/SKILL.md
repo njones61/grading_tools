@@ -300,6 +300,8 @@ Read the report the script prints. Three categories need your attention:
 
 Detection is deliberately local. Sending a page to a vision model to find the name would transmit the very thing the redaction exists to withhold, so the band is a fixed fraction of page height rather than anything adaptive.
 
+Text scrubbing works from the roster, which holds the *legal* name. It covers common diminutives, so a roster "Thomas" catches a page that says "Tom", and it matches accents loosely in both directions, since students routinely type their own name without them. A preferred name that cannot be derived from the legal one is beyond it. Treat the scrub as reducing exposure rather than eliminating it, and never tell the user a submission came out clean.
+
 Never open `roster.json` unless you are running `unmask`. Never copy it, quote its contents, or write student names into feedback while grading — the feedback documents are written against codes and get real names back in Phase 5.
 
 If the user explicitly says to skip de-identification, that's their call as the data steward — proceed with the real filenames and don't re-litigate it.
