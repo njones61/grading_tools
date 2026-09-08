@@ -21,7 +21,7 @@ jupyter nbconvert --to notebook --execute --inplace --allow-errors copy.ipynb
 ```
 
 Rules:
-- **Work on a copy** in the grading workspace. Never modify the original submission.
+- **Work on a copy** under `<assignment>/work/`, addressed by an absolute path. Never modify the original submission.
 - **Run with a timeout** (30–60s). Student code contains infinite loops; that is a finding, not a hang.
 - **`--allow-errors`** so one broken cell doesn't hide the rest of the notebook's results.
 - If the code needs a data file the student didn't submit, supply it from the assignment's `files/` folder in the content repo before concluding it's broken.

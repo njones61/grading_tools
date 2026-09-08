@@ -19,12 +19,26 @@ every file against the previous round, and copies forward only what actually
 needs grading. `ledger.json` records the per-file hashes and submission times
 that make that comparison possible; unlike the crosswalk it holds no names,
 so it is the file to read when you want to know what state a batch is in.
-`--fresh` ignores an existing roster and starts the assignment over.
+`masked/TO_GRADE.txt` lists what this round needs -- grade that, not the whole
+of `masked/`, which still holds every earlier round's copies.
+
+Rounds are numbered by the submissions folder: `submissions2` is round 2, is
+graded into `feedback2`, and uploads as `scores_upload2.csv`.
+
+`--fresh` ignores an existing roster and starts the assignment over. Every
+student gets a new code, so feedback and scores from the earlier rounds no
+longer match anything -- it is for regrading a class from scratch, not for
+recovering from a bad batch.
 
 `unmask` renames the generated feedback documents back to real student
-filenames and substitutes real names into scores.xlsx, ready for upload. It
-is safe to run repeatedly: documents already restored in an earlier round are
-recognized and left alone.
+filenames and substitutes real names into scores.xlsx. It also writes
+`round<N>_summary.txt` beside the assignment folder, naming who that round
+covered and which of them already had a grade posted. It is safe to run
+repeatedly: documents already restored in an earlier round are recognized and
+left alone.
+
+Neither the upload CSV nor the batch zip is built here. Both come from
+sync_scores.py, after a human has read the feedback documents.
 
 IMPORTANT LIMITS -- read the report `mask` prints:
   * Scanned PDFs and images cannot be scrubbed. A handwritten name or a
@@ -435,8 +449,13 @@ def mask(args):
     if src.name not in ledger["batches"]:
         ledger["batches"].append(src.name)
     # Folders pair up by number: submissions2 is graded into feedback2 and
-    # uploaded as scores_upload2.csv. One number, the same meaning everywhere.
-    rnd = ledger["batches"].index(src.name) + 1
+    # uploaded as scores_upload2.csv. One number, the same meaning everywhere,
+    # so the round comes from the folder's own digit rather than from the order
+    # folders happened to be masked in -- masking submissions3 first must still
+    # produce feedback3. A folder with no digit (the plain `submissions/` of an
+    # assignment started before rounds existed) falls back to that order.
+    m = re.search(r"(\d+)$", src.name)
+    rnd = int(m.group(1)) if m else ledger["batches"].index(src.name) + 1
     fb_dir = f"feedback{rnd}"
     ledger["updated"] = datetime.now().isoformat(timespec="seconds")
     for code, recs in batch.items():
@@ -732,8 +751,8 @@ def unmask(args):
         print(f"\nWrote {out.name} -- what round {rnd} covered, and who already had "
               f"a grade posted")
 
-    # The upload artifacts -- scores_upload.csv and batch_upload.zip -- are not
-    # built here. Every feedback document gets read and often edited before it
+    # The upload artifacts -- scores_upload<N>.csv and batch_upload.zip -- are
+    # not built here. Every feedback document gets read and often edited before it
     # goes out, and an artifact built now would be a snapshot of the draft.
     # sync_scores.py builds both from what you actually approved.
     print("\nNext: review the feedback documents, then build the upload artifacts from")

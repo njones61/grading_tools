@@ -19,7 +19,9 @@ Install the docx package:
 npm install docx
 ```
 
-The script reads a `grading_results.json` file (produced by the grading script) and generates one `.docx` file per student in a `feedback/` subfolder.
+The script reads `work/grading_results.json` (produced by the grading script) and generates one `.docx` file per student in the round's feedback folder — `feedback1/` on the first pass, `feedback2/` for a later batch of late work. `anonymize.py mask` names the round it just prepared; write into that folder, so the instructor reviews only what this round produced.
+
+The script itself belongs in `work/`, addressed by absolute path, along with everything else you generate.
 
 ---
 
@@ -86,8 +88,11 @@ const border = { style: BorderStyle.SINGLE, size: 1, color: "999999" };
 const borders = { top: border, bottom: border, left: border, right: border };
 const cellMargins = { top: 60, bottom: 60, left: 100, right: 100 };
 
-const RESULTS_PATH = 'grading_results.json';  // Set to actual path
-const OUT_DIR = 'feedback/';                    // Set to actual path
+// Absolute paths. A relative one resolves against whatever directory the
+// grader was invoked from -- usually the instructor repo, where student
+// scores must never land.
+const RESULTS_PATH = '<assignment>/work/grading_results.json';
+const OUT_DIR      = '<assignment>/feedback1/';   // feedback2/ on a later round
 
 // ======== HELPER FUNCTIONS ========
 
@@ -426,7 +431,7 @@ for path in sys.argv[1:]:
     doc = Document(path)
     status = "ok" if doc.paragraphs and doc.tables else "SUSPECT"
     print(f"{status:8} {len(doc.paragraphs):3} paragraphs  {len(doc.tables)} tables  {path}")
-' feedback/*.docx
+' <assignment>/feedback1/*.docx
 ```
 
 A document with zero tables never got its rubric summary; regenerate it. A document

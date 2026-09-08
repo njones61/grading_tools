@@ -49,13 +49,19 @@ git clone https://github.com/njones61/ce544_private.git
 
 ### 3. Install the dependencies
 
-The scripts shell out to these. Grading fails partway through Phase 4 without them.
+The scripts shell out to these.
 
 ```bash
 brew install --cask libreoffice      # recalculates scores.xlsx formulas
+brew install poppler                 # renders scanned PDFs for redaction
 pip install openpyxl python-docx     # reads submissions, validates feedback
+pip install pillow pypdf             # blacks out the name band on scans
 cd ~/grading && npm install docx     # builds the feedback .docx files
 ```
+
+Install all of them. Missing LibreOffice leaves every total in `scores.xlsx` blank; missing `docx` stops the feedback documents being written at all.
+
+**Pillow, pypdf and poppler matter more than they look.** Redaction is on by default, and without them every scanned submission falls through to UNSCRUBBABLE — masked filename, student's handwritten name still on the page. The report says so, but it says so quietly, in a list you may skim.
 
 Install `docx` in `~/grading` rather than globally: node resolves `node_modules` by walking up from the script, so one install there covers every course and assignment beneath it.
 
@@ -170,6 +176,7 @@ Then ask for the same thing — `grade 01_head`. Learning Suite hands back the w
 | **RESUBMITTED** | content changed — their old feedback and score are being replaced |
 | **ADDED** | a new file alongside one already graded |
 | **UNCHANGED** | already graded, skipped |
+| **UNCHANGED, REGRADED ANYWAY** | this student submitted something else, so their whole set comes back |
 | **RENAMED** | same content under a new filename, nothing to regrade |
 | **MISSING** | graded earlier, not in this download; nothing deleted |
 
@@ -253,6 +260,10 @@ Assignment-specific grading notes go here.
 
 Paths in the frontmatter are relative to the **content repo** root.
 
+### Phase 2 — Build the grading framework
+
+Maps the rubric, works out what to check for each item, writes the checker script, and saves all of it to `work/framework.json` with the commit each source file was at. That is what a later round reuses.
+
 ### Phase 2.5 — De-identify
 
 ```bash
@@ -307,6 +318,14 @@ This is what `finalize 01_head` runs. The feedback document is the score of reco
 4. recalculates, then writes `scores_upload<N>.csv` and `feedback<N>/batch_upload.zip`
 
 The CSV and zip cover only the round just graded. It refuses to build the zip while any document contradicts itself, since that zip is what reaches students.
+
+### Phase 7 — Debrief
+
+```bash
+python "$GT/debrief_stats.py" ~/grading/ce544/2026-fall/01_head
+```
+
+The per-item numbers behind the write-up. The prose is the grader's work — see [Debriefing an Assignment](#debriefing-an-assignment) above for what it produces and where it lands.
 
 ---
 

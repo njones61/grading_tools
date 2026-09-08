@@ -4,10 +4,10 @@
     sync_scores.py <assignment_dir> [--apply] [--fix-totals] [--zip] [--round N]
 
 The feedback document is what the student reads, so the number in it is the
-number that has to reach the gradebook. This treats `feedback/` as the source
-of truth and derives everything else from it: you edit a document during
-review, run this, and scores.xlsx and scores_upload.csv follow. Nothing is
-transcribed by hand, so nothing drifts.
+number that has to reach the gradebook. This treats the feedback folders as
+the source of truth and derives everything else from them: you edit a document
+during review, run this, and scores.xlsx and scores_upload<N>.csv follow.
+Nothing is transcribed by hand, so nothing drifts.
 
 Without --apply it only reports. With --apply it writes the document scores
 into scores.xlsx in place -- leaving the =SUM() formulas, the conditional
@@ -312,7 +312,8 @@ def main():
                          "'all' for the whole class (default: the latest round)")
     ap.add_argument("--scores", type=Path, help="scores.xlsx (default: <dir>/scores.xlsx)")
     ap.add_argument("--feedback", type=Path,
-                    help="a single feedback dir, instead of every round under <dir>")
+                    help="one feedback dir (feedback1, feedback2, ...) instead of "
+                         "every round under <dir>")
     args = ap.parse_args()
 
     root = args.assignment_dir.expanduser().resolve()

@@ -280,9 +280,9 @@ Content hash decides, the timestamp explains. Report the submission times to the
 
 A student is regraded whole. If one of their three files changed, all three come back, so partial credit is judged against the complete submission rather than the fragment that moved.
 
-`--fresh` throws the history away and starts the assignment over. Use it only if the user asks for a clean regrade of everyone.
+`--fresh` throws the history away and starts the assignment over. Every student gets a *new* code, so the feedback documents and score rows from earlier rounds no longer match anything. Use it only when the user asks for a clean regrade of the whole class, and say that consequence out loud before running it.
 
-Read the report the script prints. Two categories need your attention:
+Read the report the script prints. Three categories need your attention:
 
 - **COULD NOT PARSE** — filenames that don't match `last_first_netid_...`. These are *not* copied. Tell the user; they usually need renaming by hand.
 - **REDACTED** — scanned PDFs and images whose header band was blacked out. This is destructive: the page is rasterized, the band is painted onto the bitmap, the PDF is rebuilt, and the scanner's OCR text layer goes with it. Tell the user to look at the previews in `masked/redaction_previews/` before you start grading — the band is geometric, not a name detector, so a name written down a margin or on a later page survived it. Adjust with `--band <percent>`, or turn it off with `--no-redact`.
@@ -332,10 +332,12 @@ Once the feedback and scores are final, put the real names back so they can go t
 
 ```bash
 python "${CLAUDE_PLUGIN_ROOT}/skills/homework-grader/scripts/anonymize.py" unmask \
-    <assignment>/feedback --roster <assignment>/roster.json --scores <assignment>/scores.xlsx
+    <assignment>/feedback<N> --roster <assignment>/roster.json --scores <assignment>/scores.xlsx
 ```
 
 Feedback files are renamed to `last_first_netid_userfilename_FEEDBACK.docx`, the code inside each document body becomes `First Last (netid)`, and in `scores.xlsx` the codes become NetIDs with the First Name and Last Name columns filled in. Rewriting `scores.xlsx` clears the cached formula values, so `unmask` recalculates it for you — if it reports that LibreOffice is missing, run `recalc.py` yourself or every total will read as blank.
+
+Give it this round's folder, `feedback2` and not `feedback`. The round number in the summary file it writes comes from that name, so a bare `feedback` would produce `round1_summary.txt` no matter which batch you just graded.
 
 It also writes `round<N>_summary.txt` at the assignment root, naming who this round covered and which of them already had a grade posted. The feedback folder shows *who* was graded and cannot show *why* — a resubmitting student looks identical to a new one in it, and the difference matters, since their grade is already posted and this round is a correction to something they have seen. Point the user at that file. It sits outside the feedback folder because everything inside one goes into the batch upload zip.
 

@@ -57,6 +57,7 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 import json
+import re
 
 # ======== ADAPT THESE FOR EACH ASSIGNMENT ========
 
@@ -103,34 +104,28 @@ thin_border = Border(
 )
 center = Alignment(horizontal='center', vertical='center')
 
-# ======== NAME PARSING (adapt for each assignment) ========
+# ======== IDENTITY ========
 
-def parse_name(filename):
-    """
-    Extract first name, last name, and net ID from submission filename.
-    Adapt this function for each assignment's filename convention.
-    Common format: last_first_netid_userfilename.xlsx
-    Students often deviate — handle edge cases.
-    """
-    name = filename.replace('.xlsx', '').replace('.XLSX', '')
-    # Remove assignment-specific suffixes
-    # name = name.replace('-HW-Name-Here', '')
+def student_code(filename):
+    """The masked code this submission belongs to.
 
-    if '_' in name:
-        parts = name.split('_')
-        if len(parts) >= 3:
-            return parts[1].strip(), parts[0].strip(), parts[2].strip()
-        elif len(parts) == 2:
-            return parts[1].strip(), parts[0].strip(), ''
-    elif '-' in name:
-        parts = name.split('-')
-        if len(parts) >= 2:
-            return parts[-1].strip(), parts[0].strip(), ''
-    elif ' ' in name:
-        parts = name.split()
-        if len(parts) >= 2:
-            return parts[0].strip(), parts[-1].strip(), ''
-    return name, '', ''
+    You are grading files named S-XXXXXX_theirfilename.xlsx, so the code IS
+    the identity here. Do not parse a name out of the filename: the name is
+    not in it, and writing whatever the split produces would put "S-7F3A2B"
+    in the Last Name column and leave Net ID empty, which is exactly the
+    shape anonymize.py unmask cannot match.
+
+    The code goes in the Net ID column and First/Last stay empty. unmask
+    replaces the code with the real NetID and fills the two name cells from
+    the crosswalk.
+    """
+    m = re.match(r'^(S-[0-9A-F]{6})', filename)
+    if not m:
+        raise ValueError(
+            f"{filename!r} does not start with a masked code. Grade the files "
+            "in masked/, not the raw submissions."
+        )
+    return m.group(1)
 
 # ======== BUILD WORKBOOK ========
 
@@ -185,13 +180,11 @@ cell.border = thin_border
 
 # --- Student data rows (starting row 5) ---
 for row_idx, r in enumerate(results, 5):
-    first, last, netid = parse_name(r['filename'])
-
-    ws.cell(row=row_idx, column=1, value=first).font = data_font
+    # First and Last stay empty on purpose -- unmask fills them from the
+    # crosswalk in Phase 5. The code is the identity until then.
     ws.cell(row=row_idx, column=1).border = thin_border
-    ws.cell(row=row_idx, column=2, value=last).font = data_font
     ws.cell(row=row_idx, column=2).border = thin_border
-    ws.cell(row=row_idx, column=3, value=netid).font = data_font
+    ws.cell(row=row_idx, column=3, value=student_code(r['filename'])).font = data_font
     ws.cell(row=row_idx, column=3).border = thin_border
 
     for i, key in enumerate(rubric_keys):
@@ -302,6 +295,8 @@ print(f"Saved: {OUTPUT_PATH}")
 | Gridlines | OFF | `ws.sheet_view.showGridLines = False` |
 | Column widths | 14 (names), 10 (net ID), 12 (scores), 10 (total) | Adjust as needed |
 
+Leave one column free after Total. `sync_scores.py` adds a **Round** column there in Phase 6, recording which round each student was graded in. Do not create it yourself, and never put it before Total -- the rubric columns are paired with the feedback document's summary table by position, and a column inserted ahead of Total shifts that pairing by one.
+
 ---
 
 ## Learning Suite Upload CSV
@@ -316,7 +311,9 @@ jra94,30
 
 `Net ID` in the top-left cell, the assignment title beside it, plain numbers, one row per student. Both columns need a header or nothing imports. The max-points row, the per-item columns, and the average rows must all stay out — an `Average (points)` row imports as a student who does not exist.
 
-Do not write this from `grading_results.json`: at that point the identities are still codes. `export_upload_csv.py` derives it from the finished `scores.xlsx`, after `unmask` has restored NetIDs and recalculated the totals, so it also reflects any score you adjusted by hand.
+Do not write this from `grading_results.json`: at that point the identities are still codes.
+
+You do not write it at all. `sync_scores.py` builds it in Phase 6, after the instructor has read the feedback documents and edited the ones they disagreed with — the CSV has to reflect those edits, and an export made during grading would be a snapshot of the draft. It is named for its round, `scores_upload1.csv` for the first pass and `scores_upload2.csv` for a later batch, and holds only the students that round graded.
 
 ---
 
@@ -325,7 +322,7 @@ Do not write this from `grading_results.json`: at that point the identities are 
 After creating `scores.xlsx`, recalculate formulas so cached values are correct:
 
 ```bash
-python scripts/recalc.py scores.xlsx
+python "${CLAUDE_PLUGIN_ROOT}/skills/homework-grader/scripts/recalc.py" scores.xlsx
 ```
 
 If `recalc.py` is not available, use LibreOffice:

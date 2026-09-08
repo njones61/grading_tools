@@ -30,6 +30,8 @@ import re
 import sys
 from pathlib import Path
 
+# Standalone default. sync_scores.py passes --out and names the file for its
+# round (scores_upload2.csv), which is the form the workflow actually uses.
 DEFAULT_NAME = "scores_upload.csv"
 
 # Rows that carry statistics or rubric maxima rather than a student.

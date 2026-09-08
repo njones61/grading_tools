@@ -130,6 +130,8 @@ else:
 
 ## Output Format
 
+Write it to `<assignment>/work/grading_results.json`, by absolute path. Everything the grader generates lives under `work/` — a relative path resolves against whatever directory the grader was invoked from, which is usually the instructor repo, and per-student scores must never land in a git repo.
+
 The grading script should output a JSON file with this structure:
 
 ```json
