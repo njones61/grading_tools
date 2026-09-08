@@ -5,6 +5,8 @@ description: |
 
   Use this skill whenever the user asks to "grade homework", "grade submissions", "grade the assignment", or points at a folder of student work. Also trigger when the user mentions grading rubrics, feedback documents, or scoring student work. Even if they just say "grade these" while pointing at a folder, use this skill.
 
+  Also use it for the step *after* grading, when the user has finished reviewing the feedback documents and wants the spreadsheet and upload files rebuilt from them: "finalize 01_head", "sync the scores", "I'm done reviewing", "rebuild the upload files", "I changed some scores", "update the summary from the feedback docs". That is Phase 6, and it runs on its own — skip straight to it rather than regrading anything.
+
   Works for any course that provides a `course.yml` manifest in its instructor repo (CE 544, CE 547, CCE 270). The assignment changes every time — the workflow and output formatting stay consistent.
 ---
 
@@ -336,9 +338,27 @@ Running it again is safe. On a later batch the feedback folder holds a mix — d
 
 Report any UNMATCHED files the script lists — those are feedback documents whose code isn't in the crosswalk, usually meaning a file was hand-renamed mid-grading.
 
+Then stop and hand the batch over. Tell the user which folder to read, and that saying **"finalize <assignment>"** when they are done rebuilds the spreadsheet and the upload files from whatever they changed. Do not run Phase 6 yourself in the same breath — its whole purpose is to capture edits that have not been made yet.
+
 ## Phase 6: Reconcile After Review
 
-The user reads the feedback documents and edits the ones they disagree with. Their edits are the final word, so the spreadsheet and the upload artifacts get rebuilt from the documents rather than typed in again:
+The user reads the feedback documents and edits the ones they disagree with. Their edits are the final word, so the spreadsheet and the upload artifacts get rebuilt from the documents rather than typed in again.
+
+### Running this on its own
+
+"finalize 01_head", "sync the scores", "I'm done reviewing", "I bumped a couple of scores" — all of it means this phase and nothing else. Grading does not re-run: the documents on disk are already the answer.
+
+Three steps, and none of them read course material:
+
+1. Resolve the workspace. Read `grading_workspace` from `course.yml` in the instructor repo, and find the assignment folder under it. If the user named the assignment loosely, match it against the folders and confirm before writing.
+2. Run the command below with `--apply --zip`.
+3. Report what it found, in the user's terms — whose score moved, whose document still contradicts itself, which file to upload where.
+
+**Skip Phase 0.** The preflight guards against grading with a stale rubric, and this phase reads no rubric — it reads feedback documents and a spreadsheet, both of which live in the workspace. Do not fetch the repos, and do not stop on a dirty tree.
+
+"check 01_head", or any request to see what changed before anything is written, means the same command without `--apply`. Show them the report and stop.
+
+### The command
 
 ```bash
 python "${CLAUDE_PLUGIN_ROOT}/skills/homework-grader/scripts/sync_scores.py" \
@@ -355,12 +375,13 @@ Run it without `--apply` before handing the batch over for review, and with `--a
 - **NOT IN THE WORKBOOK** — a student graded in a later batch who has no row yet. `--apply` refuses to write until you add the rows, because inserting them means re-ranging formulas.
 - **SUPERSEDED** — a student with documents in two rounds, meaning they resubmitted. The later one is the score; the earlier is left in place as a record.
 
-It also stamps each student's round into the **Round** column of `scores.xlsx`, adding the column if it isn't there. One workbook holds the whole class, and that column is how you see who was graded when.
 - **OUT OF SYNC** — the workbook and the document differ. `--apply` makes the workbook match the document.
+
+It also stamps each student's round into the **Round** column of `scores.xlsx`, adding the column if it isn't there. One workbook holds the whole class, and that column is how you see who was graded when.
 
 It refuses to build the zip while any document contradicts itself, since that zip is what reaches students.
 
-The upload artifacts are snapshots. Any later edit to a document or a score means running this again.
+The upload artifacts are snapshots. Any later edit to a document or a score means running this again — tell the user that, since they will keep editing after the first pass.
 
 ---
 

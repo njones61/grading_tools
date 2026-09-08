@@ -113,7 +113,7 @@ From the instructor repo:
 grade 01_head
 ```
 
-The skill runs the workflow: sync check, assemble the assignment and key, de-identify, grade, generate feedback, restore names. It stops there, with everything ready for you to read.
+The skill runs the workflow: sync check, assemble the assignment and key, de-identify, grade, generate feedback, restore names. It stops there, with everything ready for you to read — the upload files come after your review, in step 4.
 
 ### 3. Review the feedback
 
@@ -127,20 +127,30 @@ Read the documents and fix the ones you disagree with. **Edit the document, not 
 
 ### 4. Build the upload artifacts
 
+Ask for it the same way you asked for the grading:
+
 ```
-python "$GT/sync_scores.py" ~/grading/ce544/2026-fall/01_head --apply --zip
+finalize 01_head
 ```
 
-This reads every feedback document, writes its scores into `scores.xlsx`, recalculates, and produces:
+"sync the scores", "I'm done reviewing", "I bumped a couple of scores" all mean the same thing. Nothing is regraded — the documents on disk are already the answer, and this reads them.
+
+It writes their scores into `scores.xlsx`, recalculates, and produces:
 
 ```
 ├── feedback1/batch_upload.zip   ← upload this, not the files individually
 └── scores_upload1.csv           ← Net ID + score, for the Grades import
 ```
 
-It also catches the mistake that is easy to make by hand: bumping a score in the summary table and leaving the section line or the totals showing the old number. Run it without `--apply` first to see what it found, and add `--fix-totals` to have it recompute the two displayed totals from the table.
+It also catches the mistake that is easy to make by hand: bumping a score in the summary table and leaving the section line or the totals showing the old number. It reports those rather than guessing, and can recompute the totals from the table if you ask. To see what it found before anything is written, say `check 01_head` instead.
 
-Both artifacts are snapshots. Edit another document afterward and run the command again.
+Both artifacts are snapshots. Edit another document afterward and say `finalize 01_head` again.
+
+By hand, if you'd rather:
+
+```bash
+python "$GT/sync_scores.py" ~/grading/ce544/2026-fall/01_head --apply --zip
+```
 
 ### 5. Late work and resubmissions
 
@@ -178,7 +188,7 @@ Round 2's work lands in its own folders, so review means reading the three late 
 └── scores.xlsx         the whole class, with a Round column
 ```
 
-Then re-run step 4. It reconciles `scores.xlsx` across every round — one workbook for the class, with a **Round** column recording who was graded when — and writes upload artifacts covering only the round just graded. Importing all forty students again would overwrite any score you had adjusted inside Learning Suite since the first upload; `--round all` exports everyone if you ever want that.
+Then `finalize 01_head` again. It reconciles `scores.xlsx` across every round — one workbook for the class, with a **Round** column recording who was graded when — and writes upload artifacts covering only the round just graded. Importing all forty students again would overwrite any score you had adjusted inside Learning Suite since the first upload; `--round all` exports everyone if you ever want that.
 
 If someone resubmitted, they have a document in both folders. The later one is the score, and `sync_scores.py` says so rather than letting the stale one count.
 
@@ -275,7 +285,7 @@ Safe to run again on a later round: documents restored earlier are recognized an
 python "$GT/sync_scores.py" ~/grading/ce544/2026-fall/01_head --apply --zip
 ```
 
-The feedback document is the score of record, so this reads them and derives everything else. Without `--apply` it only reports. It:
+This is what `finalize 01_head` runs. The feedback document is the score of record, so it reads them and derives everything else. Without `--apply` it only reports. It:
 
 1. checks each document against itself — the section score line, the summary table, and the two totals, which a hand edit usually leaves disagreeing (`--fix-totals` recomputes the totals from the table; a section line is never rewritten automatically, since the bullets under it explain the number it shows)
 2. writes each document's scores into `scores.xlsx`, leaving the formulas, conditional formatting and statistics rows untouched
