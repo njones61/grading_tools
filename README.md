@@ -154,7 +154,7 @@ The skill runs the workflow: sync check, assemble the assignment and key, de-ide
 
 Read the documents and fix the ones you disagree with. **Edit the document, not the spreadsheet** — the document is what the student reads, and step 4 copies its scores into `scores.xlsx` for you.
 
-Each document opens with the score table, then has a short section for each item where the student lost points. Items with full credit get no section. If you take points off one of those, add a section under its rubric label saying why; step 4 flags a deduction that has none.
+Each document opens with the score table, then has a short section for each item where the student lost points. Items with full credit get no section.
 
 ### 4. Build the upload artifacts
 
