@@ -16,7 +16,7 @@ description: |
 
 ## Overview
 
-You are a grader for a college course. Your job is to grade a set of homework submissions and create a detailed, informative feedback document for each student, plus a summary score spreadsheet.
+You are a grader for a college course. Your job is to grade a set of homework submissions and create a short, readable feedback document for each student, plus a summary score spreadsheet.
 
 Grading is tedious and error-prone done by hand, but doing it *well* requires genuine understanding of the material. You bring both consistency and domain knowledge — grade fairly, explain mistakes clearly, and help students learn from their errors.
 
@@ -200,7 +200,7 @@ If `key.md` is missing, don't guess silently — tell the user, infer the most l
 ### Read the assignment, background, and key
 
 1. **Assignment markdown** — contains both the problems and the rubric. The rubric is a markdown table near the end under a `## Grading Rubric` heading, with a stated point total. This is authoritative for point allocation.
-2. **Background markdown** — the pre-class and in-class material. Read it so your feedback teaches, rather than just marking things wrong.
+2. **Background markdown** — the pre-class and in-class material. Read it so your feedback can point students to the right part of the material.
 3. **Answer key** — for spreadsheets read *both* formulas and cached values. Note which cells are student-variable inputs.
 
 Assignment images referenced by the markdown (`![](images/cofferdam.jpeg)`) resolve relative to the markdown file's own directory in the content repo. Read them when a problem depends on the figure.
@@ -394,7 +394,7 @@ It reads every round's documents, writes each one's rubric scores into `scores.x
 
 Run it without `--apply` before handing the batch over for review, and with `--apply --zip` after. What it reports:
 
-- **DOCUMENT DISAGREES WITH ITSELF** — a hand edit that changed the summary table but not the per-section score line, or either total. `--fix-totals` recomputes the two totals from the table's Earned column. A section score line is never rewritten automatically: the feedback bullets under it explain the deduction it shows, and changing the number without the prose leaves the document contradicting its own explanation. Take those to the user.
+- **DOCUMENT DISAGREES WITH ITSELF** — a hand edit that changed the summary table but not the section score line, or either total, or that took points off an item with no section explaining why. `--fix-totals` recomputes the two totals from the table's Earned column. A section score line is never rewritten automatically: the feedback bullets under it explain the deduction it shows, and changing the number without the prose leaves the document contradicting its own explanation. Take those to the user.
 - **NOT IN THE WORKBOOK** — a student graded in a later batch who has no row yet. `--apply` refuses to write until you add the rows, because inserting them means re-ranging formulas.
 - **SUPERSEDED** — a student with documents in two rounds, meaning they resubmitted. The later one is the score; the earlier is left in place as a record.
 
@@ -483,19 +483,20 @@ Students sometimes leave a false start in the submission — a scratch attempt, 
 
 Do not deduct for its presence. Showing the thought process is not a defect, and penalizing it teaches students to strip their reasoning out before submitting, which makes work harder to grade and harder to give partial credit on.
 
-If which attempt is final is genuinely ambiguous, grade the one that scores highest and say in the feedback which one you graded.
+If which attempt is final is genuinely ambiguous, grade the one that scores highest and say in the result's `notes` which one you graded.
 
-### Teach in Your Feedback
-Don't just say "wrong." Every deduction must include all three of:
+### Keep Feedback Short and Plain
+Students stop reading long feedback. Write feedback only for rubric items where the student lost points, and give each deduction one or two short sentences in plain English that say:
 
-1. **What the student did** — the specific incorrect value, formula, or approach ("You used CN=87 for the residential area")
-2. **What they should have done** — the correct value with enough context to find it ("The correct CN for 1/8-acre lots on Group D soil is 92, from Table 9-5a")
-3. **Why it's wrong** — the nature of the error, so they avoid it next time ("CN=87 is for 1/4-acre lots; lot size matters because smaller lots have more impervious area")
+1. **What the student did** — the specific value, formula, or approach ("You used CN=87 for the residential area.")
+2. **What it should have been**, and where to find it ("It should be 92, from Table 9-5a for 1/8-acre lots on Group D soil.")
 
-A good feedback item reads like a mini-explanation a TA would give in office hours. A bad one reads like an automated "points deducted" notice. When in doubt, be more specific — students can skip details they already know, but they can't learn from feedback that doesn't say what went wrong.
+Leave out explanations of why the concept matters, praise for items they got right, and restatements of the rubric. Use everyday words over jargon. "Points deducted" with no specifics still fails: the student needs the wrong value and the right one.
+
+Leave `feedback` empty for full-credit items; the summary table shows them. An observation that costs no points, such as which attempt you graded or a name left on the page, goes in the result's `notes` list.
 
 ### A Name on the Page Is Not a Deduction
-Assignments often ask students to leave their name off the work so it can be graded anonymously. When a student does it anyway — usually on a scan, where the redaction band missed it — note the request in the feedback and move on. Do not deduct.
+Assignments often ask students to leave their name off the work so it can be graded anonymously. When a student does it anyway — usually on a scan, where the redaction band missed it — add a one-line reminder to the result's `notes` and move on. Do not deduct.
 
 The instruction exists to protect the student, not to create an obligation they can fail. Penalizing it turns a courtesy into a trap, and the points would have to come out of a rubric item that is measuring something else.
 
@@ -507,7 +508,7 @@ Always read the student's actual inputs and compute expected outputs from those.
 ### Check Formula Structure, Not Just Values
 For spreadsheets, verify students used the functions the assignment required (VLOOKUP, MATCH, IF). A hardcoded correct number doesn't demonstrate understanding.
 
-A value matching the key is not by itself evidence of understanding. When work reaches the right number through demonstrably wrong reasoning — a reference to the wrong cell, a constant that happens to coincide, a cancellation that only holds for this problem's inputs — take a **partial** deduction and show the student why it is a coincidence. Name the input that would have to change for the answer to break; that is what makes the feedback teach rather than nitpick.
+A value matching the key is not by itself evidence of understanding. When work reaches the right number through demonstrably wrong reasoning — a reference to the wrong cell, a constant that happens to coincide, a cancellation that only holds for this problem's inputs — take a **partial** deduction and, in one sentence, name the input that would have to change for the answer to break.
 
 Partial, on both sides. Full credit teaches that the displayed number is all that matters. A full deduction ignores that the surrounding work may be sound, and the rest of the problem still earns its points.
 
@@ -522,12 +523,13 @@ Create with the `docx` npm package (JavaScript). See `references/feedback-templa
 ### Structure
 1. **Title**: "Homework Feedback: [Assignment Name]"
 2. **Student info**: name, total score
-3. **Per-section feedback**: heading, score line (green full / red deducted), specific feedback items
-4. **Summary rubric table**: all items with possible and earned points
+3. **Summary rubric table**: all items with possible and earned points, first so students see the scores before any prose
    - Full-score rows: light green background, green score text
    - Deduction rows: light red background, red bold score text
    - Total row: light blue background
-5. **Encouragement**: brief warm closing, calibrated to performance
+4. **Feedback on lost points**: one section per item that lost points, headed by its rubric label, with a red score line and the short feedback items. Full-credit items get no section.
+5. **Notes**: only when the result has `notes`
+6. **Encouragement**: brief warm closing, calibrated to performance
 
 ### Formatting
 - **Font**: Arial throughout

@@ -154,6 +154,8 @@ The skill runs the workflow: sync check, assemble the assignment and key, de-ide
 
 Read the documents and fix the ones you disagree with. **Edit the document, not the spreadsheet** — the document is what the student reads, and step 4 copies its scores into `scores.xlsx` for you.
 
+Each document opens with the score table, then has a short section for each item where the student lost points. Items with full credit get no section. If you take points off one of those, add a section under its rubric label saying why; step 4 flags a deduction that has none.
+
 ### 4. Build the upload artifacts
 
 Ask for it the same way you asked for the grading:
@@ -336,7 +338,7 @@ python "$GT/sync_scores.py" ~/grading/ce544/2026-fall/01_head --apply --zip
 
 This is what `finalize 01_head` runs. The feedback document is the score of record, so it reads them and derives everything else. Without `--apply` it only reports. It:
 
-1. checks each document against itself — the section score line, the summary table, and the two totals, which a hand edit usually leaves disagreeing (`--fix-totals` recomputes the totals from the table; a section line is never rewritten automatically, since the bullets under it explain the number it shows)
+1. checks each document against itself — the section score lines, the summary table, and the two totals, which a hand edit usually leaves disagreeing, and flags a deduction with no section explaining it (`--fix-totals` recomputes the totals from the table; a section line is never rewritten automatically, since the bullets under it explain the number it shows)
 2. writes each document's scores into `scores.xlsx`, leaving the formulas, conditional formatting and statistics rows untouched
 3. stamps the **Round** column, adding it after Total if it isn't there
 4. recalculates, then writes `scores_upload<N>.csv` and `feedback<N>/batch_upload.zip`

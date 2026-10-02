@@ -26,8 +26,8 @@ picks a different round, and --round all exports everyone.
 When a student appears in two rounds -- they resubmitted -- the later document
 is the score, and the earlier one is reported as superseded.
 
-Three numbers in each document can disagree after a hand edit: the per-section
-"Score: 4 / 5" lines, the Earned column of the summary table, and the two
+Three numbers in each document can disagree after a hand edit: the "Score: 4 / 5"
+line of each section on lost points, the Earned column of the summary table, and the two
 totals ("Total Score:" near the top and the table's TOTAL row). Editing one
 and forgetting the others is the ordinary way this goes wrong, so every
 document is checked against itself first. The summary table is authoritative
@@ -94,18 +94,25 @@ def read_feedback(path):
     if not items:
         raise ValueError("no 'Rubric Item / Possible / Earned' summary table")
 
-    # The per-section score lines, in document order, pair up with the table
-    # rows: the template emits one section per rubric item, same order.
-    sections, stated_total = [], None
+    # Each section score line is tagged with the nearest heading above it that
+    # names a table row. The template writes sections only for items that lost
+    # points, headed by the table label; documents from before that change have
+    # one section per item under a different heading, and pair up by position.
+    labels = {norm(i["label"]) for i in items}
+    sections, stated_total, heading = [], None, None
     for para in doc.paragraphs:
         text = para.text
+        if norm(text) in labels:
+            heading = text.strip()
+            continue
         m = TOTAL_LINE.search(text)
         if m:
             stated_total = num(m.group(1))
             continue
         m = SCORE_LINE.search(text)
         if m:
-            sections.append(num(m.group(1)))
+            sections.append((heading, num(m.group(1))))
+            heading = None
 
     return {
         "path": path,
@@ -127,11 +134,23 @@ def check_internal(fb):
     if fb["stated_total"] is not None and fb["stated_total"] != fb["sum_of_items"]:
         problems.append(f"'Total Score' says {fb['stated_total']}, "
                         f"but the Earned column sums to {fb['sum_of_items']}")
-    if len(fb["sections"]) == len(fb["items"]):
-        for sec, item in zip(fb["sections"], fb["items"]):
-            if sec != item["earned"]:
-                problems.append(f"section score {sec} disagrees with the table's "
-                                f"{item['earned']} for '{item['label']}'")
+    secs = fb["sections"]
+    if secs and all(h is None for h, _ in secs):
+        if len(secs) == len(fb["items"]):
+            for (_, sec), item in zip(secs, fb["items"]):
+                if sec != item["earned"]:
+                    problems.append(f"section score {sec} disagrees with the table's "
+                                    f"{item['earned']} for '{item['label']}'")
+        return problems
+    by_label = {norm(h): sec for h, sec in secs if h is not None}
+    for item in fb["items"]:
+        sec = by_label.get(norm(item["label"]))
+        if sec is not None and sec != item["earned"]:
+            problems.append(f"section score {sec} disagrees with the table's "
+                            f"{item['earned']} for '{item['label']}'")
+        elif sec is None and item["possible"] is not None and item["earned"] < item["possible"]:
+            problems.append(f"the table takes points off '{item['label']}' "
+                            f"but no section explains why")
     return problems
 
 
@@ -457,6 +476,9 @@ def main():
             print("  Section score lines are left alone: the feedback bullets underneath one")
             print("  explain the deduction it shows, so rewriting the number without the prose")
             print("  would leave the document contradicting its own explanation. Fix by hand.")
+        if any("no section explains" in p for _, ps in internal for p in ps):
+            print("  A deduction with no section leaves the student with no reason for it.")
+            print("  Add a section under that rubric label, or restore the points.")
         print()
     if missing_rows:
         print(f"  NOT IN THE WORKBOOK ({len(missing_rows)}) -- graded, but no row yet.")

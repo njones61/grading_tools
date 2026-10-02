@@ -68,9 +68,9 @@ Default: **do not deduct for style unless the assignment's rubric has a line ite
 
 ## Feedback for Code
 
-The general three-part rule from SKILL.md still holds — what they did, what they should have done, why it matters — but for code, **quote the specific line**:
+The rule from SKILL.md still holds — what they did and what it should have been, in a sentence or two — but for code, **quote the specific line**:
 
-> **Problem 3 (−2):** Your loop was `for i in range(len(data))` and then indexed `data[i]` inside. That works, but line 14 reads `total += data[i+1]`, which steps one element past the end on the final iteration and raises `IndexError`. Iterating directly with `for value in data:` avoids the whole class of off-by-one error, since there's no index to get wrong.
+> Line 14, `total += data[i+1]`, reads past the end of the list on the last pass and raises `IndexError`. Use `data[i]`, or loop with `for value in data:`.
 
 Quoting the line makes the feedback checkable. Paraphrasing makes students hunt for what you meant.
 

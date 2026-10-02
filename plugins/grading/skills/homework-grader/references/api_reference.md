@@ -143,14 +143,14 @@ The grading script should output a JSON file with this structure:
             "rubric_key_2": 1.5
         },
         "feedback": {
-            "rubric_key_1": ["Correct! Great use of VLOOKUP + MATCH."],
-            "rubric_key_2": ["Formula missing in B7. Expected =VLOOKUP(...)", "Values are correct despite formula issue."]
+            "rubric_key_2": ["B7 has a typed number. Use =VLOOKUP(...) to look it up."]
         },
+        "notes": ["I graded your second attempt on Part 3."],
         "total": 28.5
     }
 ]
 ```
 
-Each entry in the `scores` dict uses the same rubric keys defined in the grading framework. Each entry in `feedback` is a list of strings — one per observation for that rubric item. The `total` is the sum of all scores.
+Each entry in the `scores` dict uses the same rubric keys defined in the grading framework. `feedback` holds a list of short strings for each rubric item that lost points; leave full-credit items out. `notes` is optional and holds observations that cost no points. The `total` is the sum of all scores.
 
 This JSON file is then consumed by both the feedback document generator and the scores spreadsheet generator.

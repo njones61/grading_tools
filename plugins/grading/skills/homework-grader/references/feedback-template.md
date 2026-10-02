@@ -27,7 +27,7 @@ The script itself belongs in `work/`, addressed by absolute path, along with eve
 
 ## Data Structures to Adapt
 
-These three objects must be updated for each assignment. They define what rubric items exist, their display labels, and section groupings.
+These two objects must be updated for each assignment. They define what rubric items exist and their display labels.
 
 ### `maxPts` — Point values per rubric item
 ```javascript
@@ -38,7 +38,7 @@ const maxPts = {
 };
 ```
 
-### `rubricLabels` — Labels for the summary table
+### `rubricLabels` — Labels for the summary table and the section headings
 ```javascript
 const rubricLabels = {
     item_key_1: 'Part 1 - Description of what was graded',
@@ -47,14 +47,9 @@ const rubricLabels = {
 };
 ```
 
-### `sectionHeaders` — Headers for detailed feedback sections
-```javascript
-const sectionHeaders = {
-    item_key_1: 'Part 1: Topic - Subtopic',
-    item_key_2: 'Part 2: Topic - Subtopic',
-    // ... same keys as maxPts
-};
-```
+The same label heads the table row and, when the student lost points there, the
+feedback section below the table. `sync_scores.py` pairs a section with its table
+row by that text, so keep them identical.
 
 ---
 
@@ -75,11 +70,7 @@ const maxPts = {
 };
 
 const rubricLabels = {
-    // rubric_key: 'Display label for summary table'
-};
-
-const sectionHeaders = {
-    // rubric_key: 'Section heading for detailed feedback'
+    // rubric_key: 'Label for the summary table row and the section heading'
 };
 
 // ======== CONSTANTS (do not change) ========
@@ -154,51 +145,10 @@ async function createFeedback(result) {
         ]
     }));
 
-    // --- Per-section detailed feedback ---
-    const keys = Object.keys(sectionHeaders);
-    for (const key of keys) {
-        const score = result.scores[key];
-        const max = maxPts[key];
-        const feedback = result.feedback[key] || [];
-
-        // Section heading
-        children.push(new Paragraph({
-            heading: HeadingLevel.HEADING_2,
-            spacing: { before: 200, after: 100 },
-            children: [new TextRun({
-                text: sectionHeaders[key],
-                bold: true, size: 22, font: "Arial"
-            })]
-        }));
-
-        // Score line (color-coded)
-        const isFullScore = score >= max;
-        children.push(new Paragraph({
-            spacing: { after: 80 },
-            children: [
-                new TextRun({ text: `Score: `, bold: true, size: 20, font: "Arial" }),
-                new TextRun({
-                    text: `${score} / ${max}`,
-                    bold: true, size: 20, font: "Arial",
-                    color: isFullScore ? "008000" : "FF0000"
-                }),
-            ]
-        }));
-
-        // Feedback bullet items
-        for (const item of feedback) {
-            children.push(new Paragraph({
-                spacing: { after: 60 },
-                indent: { left: 360 },
-                children: [new TextRun({ text: item, size: 20, font: "Arial" })]
-            }));
-        }
-    }
-
-    // --- Summary rubric table ---
+    // --- Summary rubric table (first, so students see the scores at a glance) ---
     children.push(new Paragraph({
         heading: HeadingLevel.HEADING_1,
-        spacing: { before: 400, after: 200 },
+        spacing: { before: 200, after: 200 },
         children: [new TextRun({
             text: "Grading Summary", bold: true, size: 28, font: "Arial"
         })]
@@ -322,6 +272,59 @@ async function createFeedback(result) {
     });
     children.push(rubricTable);
 
+    // --- Feedback on lost points only ---
+    // Items with full credit get no section; the table already shows them.
+    // The heading is the table label, which sync_scores.py matches on.
+    for (const key of Object.keys(rubricLabels)) {
+        const score = result.scores[key];
+        const max = maxPts[key];
+        if (score >= max) continue;
+        const feedback = result.feedback[key] || [];
+
+        children.push(new Paragraph({
+            heading: HeadingLevel.HEADING_2,
+            spacing: { before: 300, after: 80 },
+            children: [new TextRun({
+                text: rubricLabels[key],
+                bold: true, size: 22, font: "Arial"
+            })]
+        }));
+        children.push(new Paragraph({
+            spacing: { after: 80 },
+            children: [
+                new TextRun({ text: `Score: `, bold: true, size: 20, font: "Arial" }),
+                new TextRun({
+                    text: `${score} / ${max}`,
+                    bold: true, size: 20, font: "Arial", color: "FF0000"
+                }),
+            ]
+        }));
+        for (const item of feedback) {
+            children.push(new Paragraph({
+                spacing: { after: 60 },
+                indent: { left: 360 },
+                children: [new TextRun({ text: item, size: 20, font: "Arial" })]
+            }));
+        }
+    }
+
+    // --- Notes that cost no points (which attempt was graded, a name on the page) ---
+    const notes = result.notes || [];
+    if (notes.length) {
+        children.push(new Paragraph({
+            heading: HeadingLevel.HEADING_2,
+            spacing: { before: 300, after: 80 },
+            children: [new TextRun({ text: "Notes", bold: true, size: 22, font: "Arial" })]
+        }));
+        for (const note of notes) {
+            children.push(new Paragraph({
+                spacing: { after: 60 },
+                indent: { left: 360 },
+                children: [new TextRun({ text: note, size: 20, font: "Arial" })]
+            }));
+        }
+    }
+
     // --- Encouragement ---
     children.push(new Paragraph({ spacing: { before: 300 }, children: [] }));
     const pct = total / TOTAL_POINTS;
@@ -329,9 +332,9 @@ async function createFeedback(result) {
     if (pct >= 0.93) {
         encouragement = "Excellent work! You demonstrated a strong understanding of the material. Keep it up!";
     } else if (pct >= 0.83) {
-        encouragement = "Good job overall! You have a solid foundation. Review the feedback above for areas where you can improve.";
+        encouragement = "Good job overall! You have a solid foundation. Review the notes above on the points you missed.";
     } else if (pct >= 0.67) {
-        encouragement = "You made a good effort on this assignment. Please review the specific feedback for each section and make sure you understand the concepts. Feel free to reach out during office hours for help.";
+        encouragement = "You made a good effort on this assignment. Please read the notes above on each item you missed. Feel free to reach out during office hours for help.";
     } else {
         encouragement = "Please review the assignment instructions carefully and revisit the concepts from the reading material. Office hours are a great resource for getting help.";
     }
