@@ -47,9 +47,9 @@ const rubricLabels = {
 };
 ```
 
-The same label heads the table row and, when the student lost points there, the
-feedback section below the table. `sync_scores.py` pairs a section with its table
-row by that text, so keep them identical.
+The same label heads the table row and any section about that item under
+Points Missed or Other Feedback. `sync_scores.py` pairs a Points Missed section
+with its table row by that text, so keep them identical.
 
 ---
 
@@ -272,23 +272,32 @@ async function createFeedback(result) {
     });
     children.push(rubricTable);
 
-    // --- Feedback on lost points only ---
-    // Items with full credit get no section; the table already shows them.
+    const partHeading = (text) => new Paragraph({
+        heading: HeadingLevel.HEADING_1,
+        spacing: { before: 400, after: 120 },
+        children: [new TextRun({ text, bold: true, size: 28, font: "Arial" })]
+    });
+    const itemHeading = (text) => new Paragraph({
+        heading: HeadingLevel.HEADING_2,
+        spacing: { before: 300, after: 80 },
+        children: [new TextRun({ text, bold: true, size: 22, font: "Arial" })]
+    });
+    const bullet = (text) => new Paragraph({
+        spacing: { after: 60 },
+        indent: { left: 360 },
+        children: [new TextRun({ text, size: 20, font: "Arial" })]
+    });
+    const keys = Object.keys(rubricLabels);
+
+    // --- Points Missed: one section per item that lost points ---
+    // Full-credit items get no section here; the table already shows them.
     // The heading is the table label, which sync_scores.py matches on.
-    for (const key of Object.keys(rubricLabels)) {
+    const missed = keys.filter(k => result.scores[k] < maxPts[k]);
+    if (missed.length) children.push(partHeading("Points Missed"));
+    for (const key of missed) {
         const score = result.scores[key];
         const max = maxPts[key];
-        if (score >= max) continue;
-        const feedback = result.feedback[key] || [];
-
-        children.push(new Paragraph({
-            heading: HeadingLevel.HEADING_2,
-            spacing: { before: 300, after: 80 },
-            children: [new TextRun({
-                text: rubricLabels[key],
-                bold: true, size: 22, font: "Arial"
-            })]
-        }));
+        children.push(itemHeading(rubricLabels[key]));
         children.push(new Paragraph({
             spacing: { after: 80 },
             children: [
@@ -299,30 +308,22 @@ async function createFeedback(result) {
                 }),
             ]
         }));
-        for (const item of feedback) {
-            children.push(new Paragraph({
-                spacing: { after: 60 },
-                indent: { left: 360 },
-                children: [new TextRun({ text: item, size: 20, font: "Arial" })]
-            }));
-        }
+        for (const item of result.feedback[key] || []) children.push(bullet(item));
     }
 
-    // --- Notes that cost no points (which attempt was graded, a name on the page) ---
+    // --- Other Feedback: better habits on full-credit work, and general notes ---
+    // No score line here, so sync_scores.py never reads these as deductions.
+    const suggestions = result.suggestions || {};
+    const suggested = keys.filter(k => result.scores[k] >= maxPts[k] && (suggestions[k] || []).length);
     const notes = result.notes || [];
+    if (suggested.length || notes.length) children.push(partHeading("Other Feedback"));
+    for (const key of suggested) {
+        children.push(itemHeading(rubricLabels[key]));
+        for (const item of suggestions[key]) children.push(bullet(item));
+    }
     if (notes.length) {
-        children.push(new Paragraph({
-            heading: HeadingLevel.HEADING_2,
-            spacing: { before: 300, after: 80 },
-            children: [new TextRun({ text: "Notes", bold: true, size: 22, font: "Arial" })]
-        }));
-        for (const note of notes) {
-            children.push(new Paragraph({
-                spacing: { after: 60 },
-                indent: { left: 360 },
-                children: [new TextRun({ text: note, size: 20, font: "Arial" })]
-            }));
-        }
+        children.push(itemHeading("General"));
+        for (const note of notes) children.push(bullet(note));
     }
 
     // --- Encouragement ---
@@ -332,9 +333,9 @@ async function createFeedback(result) {
     if (pct >= 0.93) {
         encouragement = "Excellent work! You demonstrated a strong understanding of the material. Keep it up!";
     } else if (pct >= 0.83) {
-        encouragement = "Good job overall! You have a solid foundation. Review the notes above on the points you missed.";
+        encouragement = "Good job overall! You have a solid foundation. Review the Points Missed section above.";
     } else if (pct >= 0.67) {
-        encouragement = "You made a good effort on this assignment. Please read the notes above on each item you missed. Feel free to reach out during office hours for help.";
+        encouragement = "You made a good effort on this assignment. Please read the Points Missed section above. Feel free to reach out during office hours for help.";
     } else {
         encouragement = "Please review the assignment instructions carefully and revisit the concepts from the reading material. Office hours are a great resource for getting help.";
     }

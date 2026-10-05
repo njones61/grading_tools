@@ -64,7 +64,7 @@ For matplotlib and similar output, check what the assignment actually required â
 
 ## Style
 
-Default: **do not deduct for style unless the assignment's rubric has a line item for it.** Comment on it warmly instead â€” naming, structure, and readability are worth mentioning as growth, not as penalty. If a rubric item does cover documentation or comments, grade it against what the rubric says, not against your own taste.
+Default: **do not deduct for style unless the assignment's rubric has a line item for it.** When a style habit is worth changing, mention it in `suggestions` instead (see "Better Habits on Full-Credit Work" in SKILL.md). If a rubric item does cover documentation or comments, grade it against what the rubric says, not against your own taste.
 
 ## Feedback for Code
 

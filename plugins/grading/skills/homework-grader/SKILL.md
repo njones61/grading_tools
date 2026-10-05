@@ -495,6 +495,11 @@ Leave out explanations of why the concept matters, praise for items they got rig
 
 Leave `feedback` empty for full-credit items; the summary table shows them. An observation that costs no points, such as which attempt you graded or a name left on the page, goes in the result's `notes` list.
 
+### Better Habits on Full-Credit Work
+Sometimes a student earns full credit with an approach that works but will cause trouble later. Two examples from a Gantt chart assignment: `=AVERAGE(C8,C9,C10)` where `=AVERAGE(C8:C10)` would pick up a task inserted into the phase later, and thirteen conditional formatting rules, one per row, doing the work of two rules covering the whole grid. Put these in the result's `suggestions`, keyed by rubric item, and keep the full marks. They print under **Other Feedback**, apart from the deductions, so the student can see they cost nothing.
+
+Write one only when the better habit is concrete and the student would use it again. In one or two sentences, say what they did, what to do instead, and what it gains them. Expect a handful per batch: in an 83-submission batch it came up four times. A cleaner route that gains nothing, or a habit you just happen to prefer, does not get a suggestion.
+
 ### A Name on the Page Is Not a Deduction
 Assignments often ask students to leave their name off the work so it can be graded anonymously. When a student does it anyway — usually on a scan, where the redaction band missed it — add a one-line reminder to the result's `notes` and move on. Do not deduct.
 
@@ -527,8 +532,8 @@ Create with the `docx` npm package (JavaScript). See `references/feedback-templa
    - Full-score rows: light green background, green score text
    - Deduction rows: light red background, red bold score text
    - Total row: light blue background
-4. **Feedback on lost points**: one section per item that lost points, headed by its rubric label, with a red score line and the short feedback items. Full-credit items get no section.
-5. **Notes**: only when the result has `notes`
+4. **Points Missed**: one section per item that lost points, headed by its rubric label, with a red score line and the short feedback items. Full-credit items get no section.
+5. **Other Feedback**: only when the result has `suggestions` or `notes`. Each suggestion sits under its rubric label with no score line, and notes go under "General".
 6. **Encouragement**: brief warm closing, calibrated to performance
 
 ### Formatting
