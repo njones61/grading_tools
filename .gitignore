@@ -2,6 +2,8 @@
 roster.json
 # Workspace grading state. It carries no names, but it is student work either way.
 ledger.json
+# Canvas pull/push record: ties NetIDs to Canvas user ids.
+canvas.json
 
 .DS_Store
 ._*
