@@ -470,3 +470,22 @@ def test_check_deps_wants_a_token_only_for_canvas(tmp_path):
     assert "chmod 600" in check_deps.check_canvas_token(t)["install"]
     os.chmod(t, 0o600)
     assert check_deps.check_canvas_token(t) is None
+
+
+def test_feedback_fingerprint_ignores_save_time(tmp_path):
+    """A rebuilt but unchanged .docx must not look new, or push resends it."""
+    import zipfile
+    from canvas_api import content_sha256
+
+    def docx(name, body, saved):
+        p = tmp_path / name
+        with zipfile.ZipFile(p, "w") as z:
+            z.writestr("word/document.xml", body)
+            z.writestr("docProps/core.xml", f"<modified>{saved}</modified>")
+        return p
+
+    a = docx("a.docx", "<w:t>27 / 30</w:t>", "2027-01-20T10:00:00Z")
+    b = docx("b.docx", "<w:t>27 / 30</w:t>", "2027-01-20T10:00:01Z")
+    c = docx("c.docx", "<w:t>28 / 30</w:t>", "2027-01-20T10:00:00Z")
+    assert content_sha256(a) == content_sha256(b)
+    assert content_sha256(a) != content_sha256(c)

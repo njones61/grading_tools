@@ -425,6 +425,27 @@ def sha256_of(path):
     return h.hexdigest()
 
 
+def content_sha256(path):
+    """A feedback document's fingerprint that ignores when it was saved.
+
+    A .docx is a zip whose docProps/ parts and entry dates change on every save,
+    so rebuilding an unchanged document gives new bytes. Hash the other parts'
+    contents instead, so push resends a document only when its words change.
+    Anything that isn't a readable zip falls back to the raw bytes.
+    """
+    import zipfile
+    try:
+        with zipfile.ZipFile(path) as z:
+            h = hashlib.sha256()
+            for name in sorted(z.namelist()):
+                if name.startswith("docProps/"):
+                    continue
+                h.update(name.encode() + b"\0" + z.read(name) + b"\0")
+            return h.hexdigest()
+    except zipfile.BadZipFile:
+        return sha256_of(path)
+
+
 # --------------------------------------------------------------------------- #
 # canvas.json -- what was pulled and pushed, per assignment folder
 # --------------------------------------------------------------------------- #

@@ -43,7 +43,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from canvas_api import (CanvasError, Canvas, load_manifest, now_iso,  # noqa: E402
-                        pulled_record, read_token, save_manifest, sha256_of,
+                        pulled_record, read_token, save_manifest, content_sha256,
                         user_for_netid, DEFAULT_TOKEN_FILE)
 from sync_scores import (CODE_RE, check_internal, load_scores, num,  # noqa: E402
                          read_feedback, round_dirs)
@@ -214,7 +214,7 @@ def plan(adir, manifest, docs, subs, assignment, overwrite):
             continue
         row["overwriting"] = changed
 
-        sha = sha256_of(f)
+        sha = content_sha256(f)     # a rebuilt but unchanged document isn't resent
         row.update(sha256=sha, attempt=g_att,
                    send_grade=not same(now, score),
                    send_doc=not (last and last.get("sha256") == sha))
