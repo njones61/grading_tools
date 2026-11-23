@@ -9,6 +9,8 @@ description: |
 
   And for the write-up afterwards: "debrief 01_head", "how did the class do", "where did students struggle", "was anything wrong with the assignment", "what should I fix before next year". That is Phase 7, also on its own.
 
+  For a course on Canvas (`lms: canvas` in course.yml) it also fetches submissions and sends grades: "pull 01_head", "get the submissions from Canvas" is Phase 0.5 on its own; "push 01_head", "send the grades to Canvas", "upload the scores" is the Canvas end of Phase 6, and always asks before sending.
+
   Works for any course that provides a `course.yml` manifest in its instructor repo (CE 544, CE 547, CCE 270). The assignment changes every time — the workflow and output formatting stay consistent.
 ---
 
@@ -55,8 +57,11 @@ Every assignment gets one folder, and it has a fixed shape:
 │   └── decisions.md      judgment calls, so round two matches round one
 ├── scores.xlsx           the whole class, every round
 ├── roster.json           the crosswalk (mode 600)
-└── ledger.json           per-code hashes, timestamps, grading status
+├── ledger.json           per-code hashes, timestamps, grading status
+└── canvas.json           Canvas courses: user ids, attempts, what was sent (mode 600)
 ```
+
+On Canvas there are no `scores_upload<N>.csv` imports or `batch_upload.zip` files to hand over; Phase 6 sends each student's score and document to Canvas directly.
 
 **Folders pair up by number.** `submissions1` is graded into `feedback1` and uploaded as `scores_upload1.csv`; `submissions2` into `feedback2`, and so on. One number, the same meaning everywhere. A round's folder holds only the documents that round produced, so the user reviews the three late submissions rather than re-reading forty.
 
@@ -67,7 +72,8 @@ Every assignment gets one folder, and it has a fixed shape:
 The three derived artifacts have one direction of flow, and it never reverses:
 
 ```
-feedbackN/*.docx  ──►  scores.xlsx  ──►  scores_uploadN.csv  +  feedbackN/batch_upload.zip
+feedbackN/*.docx  ──►  scores.xlsx  ──►  scores_uploadN.csv  +  feedbackN/batch_upload.zip   Learning Suite
+                                    ──►  canvas_push.py: score + document per student         Canvas
 ```
 
 The document is what the student reads, so the number in it is the number that reaches the gradebook. Never hand-transcribe a score into `scores.xlsx`; edit the document and re-derive. Phase 6 does the deriving.
@@ -101,6 +107,39 @@ Interpreting the result:
 | Missing dependencies | **Stop.** Give the user the install commands it printed. Do not grade around it. |
 
 Never work around a failed preflight by reading files anyway. A stale rubric silently produces wrong scores for the whole class — that is far worse than stopping to ask.
+
+For a Canvas course the dependency check also covers `requests`, PyYAML, and the API token file at `~/.config/canvas/token`, which must exist at mode 600. If the token is missing, give the user the command the preflight printed; never ask them to paste the token into the conversation.
+
+## Phase 0.5: Get the Submissions
+
+Read `lms` from `course.yml`. Absent means `learning_suite`.
+
+**Learning Suite.** The user has downloaded the submissions into the next `submissions<N>/` folder of `<grading_workspace>/<term>/<assignment>/`. Find the newest one and go on to Phase 1.
+
+**Canvas.** Pull them:
+
+```bash
+python "${CLAUDE_PLUGIN_ROOT}/skills/homework-grader/scripts/canvas_pull.py" \
+    /path/to/course_private <assignment_key>
+```
+
+It looks the assignment key up in the `canvas:` block of `course.yml`, downloads every student's latest attempt into the next `submissions<N>/` under `<grading_workspace>/<term>/<assignment_key>/`, names each file `last_first_netid_theirfilename` so Phase 2.5 runs unchanged, and records each student's Canvas user id in `canvas.json`. Its first two lines name the Canvas assignment and the assignment folder; use that folder from here on.
+
+| Result | What to do |
+|---|---|
+| Pulled into `submissions<N>/` | Go on, and mask that folder in Phase 2.5. |
+| Nothing new since `submissions<N>/` | If `feedback<N>/` exists, that folder is graded: tell the user there is nothing new to grade, and stop. Otherwise go on with it. |
+| Nobody has submitted yet | Say so and stop. |
+| `matched by name` in the first line | The key was not in either map. Tell the user which Canvas assignment it picked, and confirm before grading. |
+| error: several assignments match, or none | Show the user the candidates it listed and ask which. Re-run with `--assignment-id`, and suggest adding the key under `canvas.assignments` in `course.yml`. |
+| NO NETID | Those students' Canvas user id fills the NetID slot. Grading works; tell the user. |
+| NOT A FILE UPLOAD | Those students submitted text or a URL, so there is no file to grade. Tell the user. |
+
+The report gives counts and Canvas user ids, never names, because nothing has been masked yet. Keep it that way: do not list `submissions<N>/`, and never open `canvas.json`, which ties names and NetIDs to Canvas ids. Phase 2.5 reports the detail under codes.
+
+A later round runs the same command. Like a Learning Suite download, a pull holds the whole class, and Phase 2.5 hashes each file against the last round.
+
+"pull 01_head" on its own means this phase and nothing else.
 
 ## Phase 1: Resolve the Assignment
 
@@ -271,7 +310,7 @@ Then **grade the `masked/` directory, not `submissions/`.**
 
 ### Later downloads
 
-Learning Suite hands back the whole class every time you download, so a second pull is a superset of the first. `mask` sorts that out itself: an existing `roster.json` means this is a later batch, returning students keep the codes their feedback and scores already carry, and every file is hashed against the previous round.
+Learning Suite hands back the whole class every time you download, and a Canvas pull does the same, so a second batch is a superset of the first. `mask` sorts that out itself: an existing `roster.json` means this is a later batch, returning students keep the codes their feedback and scores already carry, and every file is hashed against the previous round.
 
 | Report line | Meaning |
 |---|---|
@@ -283,7 +322,7 @@ Learning Suite hands back the whole class every time you download, so a second p
 | **RENAMED** | same bytes, new filename — nothing to regrade |
 | **MISSING** | graded earlier, absent from this download; nothing was deleted |
 
-Content hash decides, the timestamp explains. Report the submission times to the user for anything new or resubmitted — late policy is theirs to apply, and `grading_guide.md` is where it lives.
+Content hash decides, the timestamp explains. Report the submission times to the user for anything new or resubmitted. On Learning Suite late policy is theirs to apply, and `grading_guide.md` is where it lives. On Canvas the course's late policy applies when the score is entered, so never deduct for lateness in the feedback or the score.
 
 A student is regraded whole. If one of their three files changed, all three come back, so partial credit is judged against the complete submission rather than the fragment that moved.
 
@@ -344,7 +383,7 @@ Then let Phase 6 reconcile — it will tell you if a row and its document disagr
 
 ## Phase 5: Restore Identities
 
-Once the feedback and scores are final, put the real names back so they can go to Learning Suite:
+Once the feedback and scores are final, put the real names back so they can go to Learning Suite or Canvas:
 
 ```bash
 python "${CLAUDE_PLUGIN_ROOT}/skills/homework-grader/scripts/anonymize.py" unmask \
@@ -361,7 +400,7 @@ Running it again is safe. On a later batch the feedback folder holds a mix — d
 
 Report any UNMATCHED files the script lists — those are feedback documents whose code isn't in the crosswalk, usually meaning a file was hand-renamed mid-grading.
 
-Then stop and hand the batch over. Tell the user which folder to read, and that saying **"finalize <assignment>"** when they are done rebuilds the spreadsheet and the upload files from whatever they changed. Do not run Phase 6 yourself in the same breath — its whole purpose is to capture edits that have not been made yet.
+Then stop and hand the batch over. Tell the user which folder to read, and that saying **"finalize <assignment>"** when they are done rebuilds the spreadsheet and the upload files from whatever they changed. On Canvas, finalize then lists what it would send and asks before sending it. Do not run Phase 6 yourself in the same breath — its whole purpose is to capture edits that have not been made yet.
 
 ## Phase 6: Reconcile After Review
 
@@ -373,9 +412,9 @@ The user reads the feedback documents and edits the ones they disagree with. The
 
 Three steps, and none of them read course material:
 
-1. Resolve the workspace. Read `grading_workspace` from `course.yml` in the instructor repo, and find the assignment folder under it. If the user named the assignment loosely, match it against the folders and confirm before writing.
-2. Run the command below with `--apply --zip`.
-3. Report what it found, in the user's terms — whose score moved, whose document still contradicts itself, which file to upload where.
+1. Resolve the workspace. Read `grading_workspace` and `lms` from `course.yml` in the instructor repo, and find the assignment folder under it. If the user named the assignment loosely, match it against the folders and confirm before writing.
+2. Run the command below: with `--apply --zip` for Learning Suite, with `--apply` alone for Canvas.
+3. Report what it found, in the user's terms — whose score moved, whose document still contradicts itself, which file to upload where. On Canvas, go on to [Sending to Canvas](#sending-to-canvas).
 
 **Skip Phase 0.** The preflight guards against grading with a stale rubric, and this phase reads no rubric — it reads feedback documents and a spreadsheet, both of which live in the workspace. Do not fetch the repos, and do not stop on a dirty tree.
 
@@ -405,6 +444,37 @@ It also stamps each student's round into the **Round** column of `scores.xlsx`, 
 It refuses to build the zip while any document contradicts itself, since that zip is what reaches students.
 
 The upload artifacts are snapshots. Any later edit to a document or a score means running this again — tell the user that, since they will keep editing after the first pass.
+
+### Sending to Canvas
+
+For a Canvas course, the upload artifacts are replaced by a push. After `sync_scores.py --apply`, run it as a dry run:
+
+```bash
+python "${CLAUDE_PLUGIN_ROOT}/skills/homework-grader/scripts/canvas_push.py" <assignment>
+```
+
+It sends nothing. For each student the latest round graded, it lists the score from their feedback document, what Canvas holds now, whether Canvas marked the work late, and whether it would send the score, the document, or both. `--round N` or `--round all` widens it, as in `sync_scores.py`.
+
+**Show the user that list and ask before sending** — "Send these 12 scores and feedback documents to Canvas?" Then, only on a clear yes in that same exchange:
+
+```bash
+python "${CLAUDE_PLUGIN_ROOT}/skills/homework-grader/scripts/canvas_push.py" <assignment> --send
+```
+
+Treat "finalize" as a request to reconcile, and ask about sending separately every time, since sending puts numbers in students' gradebooks. "push 01_head" or "send the grades to Canvas" means: reconcile if needed, run the dry run, show it, and ask.
+
+| Report line | What to do |
+|---|---|
+| **SEND** | what goes out on `--send` |
+| **UP TO DATE** | Canvas already has this score and this exact document. Running it again sends nothing twice. |
+| **CHANGED IN CANVAS** | Someone changed the score in Canvas after the last push, or entered one there that this tool never sent. Report both numbers. Pass `--overwrite <netid>` only when the user names that student and says to replace it. |
+| **RESUBMITTED SINCE THE PULL** | The student has a newer attempt than the one graded. Skipped; the next `grade` pulls and grades it. |
+| **BLOCKED** | The document disagrees with itself or with `scores.xlsx`, is still masked, or the student is not in `canvas.json`. Fix it and finalize again. |
+| **CANNOT SEND** | The assignment posts grades automatically, so a grade sent now would reach the student at once. Give the user the fix the message names. Never send around it. |
+
+Scores go up raw: Canvas applies the course's late policy when a score is entered on a late submission, so the number in the feedback document is the number to send.
+
+The push enters grades and never posts them. After a send, tell the user the grades are hidden until they post them from the Canvas gradebook.
 
 ---
 
@@ -641,10 +711,11 @@ Before handing the batch over for review:
 - [ ] Variable inputs accounted for — no false deductions from different input choices
 - [ ] Every deduction includes a teaching explanation, not just "wrong"
 - [ ] Resubmissions reported with both timestamps, and whose earlier feedback was replaced
+- [ ] Canvas course: no deduction for lateness anywhere — Canvas applies its own late policy
 - [ ] `work/decisions.md` records the judgment calls this round made
 - [ ] Every file you generated is under `work/` — **run the Phase 0 preflight again and confirm both repos are still clean**
 
-The upload artifacts come after the user's review, from Phase 6.
+The upload artifacts, or the Canvas send, come after the user's review, from Phase 6.
 
 ## File Size and Format Pitfalls
 

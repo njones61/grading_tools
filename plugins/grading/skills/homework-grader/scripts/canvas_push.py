@@ -11,8 +11,6 @@ attaches their feedback .docx as a submission comment.
 Without --send it is a dry run: it lists what it would send, and to whom, and
 sends nothing. Read that list before sending.
 
-What it sends, and what it leaves alone:
-
   * The raw score, from the feedback document's summary table -- the score of
     record. Canvas applies the course's late policy to a late submission
     itself, so nothing is deducted here.

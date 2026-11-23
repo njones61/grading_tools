@@ -4,11 +4,13 @@ Private Claude Code plugin marketplace holding the teaching tools shared across 
 
 **This file is the grading manual for every course.** The course repos hold keys and course policy; how the grading workflow itself works is documented here, once, in the same repo as the scripts it describes.
 
-| Course | Content repo | Instructor repo | Workspace |
-|---|---|---|---|
-| CE 544 | `njones61/ce544` | `njones61/ce544_private` | `~/grading/ce544` |
-| CE 547 | `njones61/ce547` | `njones61/ce547_private` | `~/grading/ce547` |
-| CCE 270 | `byu-cce270/content` | `byu-cce270/instructor` | `~/grading/cce270` |
+| Course | Content repo | Instructor repo | Workspace | Students submit on |
+|---|---|---|---|---|
+| CE 544 | `njones61/ce544` | `njones61/ce544_private` | `~/grading/ce544` | Canvas, from Winter 2027 |
+| CE 547 | `njones61/ce547` | `njones61/ce547_private` | `~/grading/ce547` | Learning Suite |
+| CCE 270 | `byu-cce270/content` | `byu-cce270/instructor` | `~/grading/cce270` | Learning Suite |
+
+`lms:` in each course's `course.yml` picks the path. Grading itself is identical either way; the two differ in how submissions arrive and how grades leave.
 
 ---
 
@@ -75,6 +77,7 @@ brew install --cask libreoffice      # recalculates scores.xlsx formulas
 brew install poppler                 # renders scanned PDFs for redaction
 pip install openpyxl python-docx     # reads submissions, validates feedback
 pip install pillow pypdf             # blacks out the name band on scans
+pip install requests pyyaml          # Canvas courses: pull and push
 cd ~/grading && npm install docx     # builds the feedback .docx files
 ```
 
@@ -97,6 +100,39 @@ mkdir -p ~/grading/ce544
 ```
 
 Back this directory up — Time Machine, or a Drive folder outside any repo.
+
+### 5. Canvas courses: a token and a `canvas:` block
+
+**The API token.** In Canvas, open Account → Settings, and under Approved Integrations choose **+ New Access Token**. Canvas shows the token once. Copy it, then:
+
+```bash
+mkdir -p ~/.config/canvas
+pbpaste > ~/.config/canvas/token
+chmod 600 ~/.config/canvas/token
+```
+
+`pbpaste` writes it straight from the clipboard, so it never lands in your shell history. The token can do anything your Canvas account can, in every course. The scripts refuse a token file other accounts can read, send it only to the course's Canvas host as a header, and never print it or put it in a URL. Keep it out of every repo.
+
+**`course.yml`** gets the LMS and the Canvas course:
+
+```yaml
+lms: canvas
+canvas:
+  host: https://byu.instructure.com
+  course_id: 40232
+  assignments_file: canvas/state.json   # assignment key -> Canvas assignment id
+  assignments_prefix: "hw:"             # whose keys read hw:<key>
+```
+
+The course id is the number in the course's Canvas URL. The grader looks up each assignment key (`01_head`) in this order:
+
+1. `assignments:` in the block, written out by hand (`01_head: 1532387`)
+2. `assignments_file:`, a JSON file in the instructor repo. CE 544's `canvas/sync.py` writes one as it creates the assignments.
+3. The Canvas assignment names, taking the one whose name contains every word of the key. It reports the match; two matches, or none, is an error that lists the candidates.
+
+The term folder in the workspace comes from the Canvas course's term ("2027 Winter" becomes `2027-winter`). `term:` in the block overrides it. The NetID comes from each student's Canvas `login_id`; `netid_field:` changes that if another school's Canvas keeps it elsewhere.
+
+**Make the assignments post grades manually.** In the Canvas gradebook: the gear (Gradebook Settings) → Grade Posting Policy → Manually Post Grades, which covers the whole course. A single assignment's column menu has the same setting. While an assignment posts automatically, any grade entered on it is visible to the student at once, so the push refuses to send to it.
 
 ---
 
@@ -121,7 +157,9 @@ The assignment students read *is* the file the grader grades against — a markd
 
 ## Grading an Assignment
 
-### 1. Download submissions from Learning Suite
+### 1. Get the submissions
+
+**Learning Suite.** Download them into a numbered folder:
 
 ```
 ~/grading/ce544/2026-fall/01_head/
@@ -134,6 +172,18 @@ Number the folder. A later download goes in `submissions2`, and the numbers pair
 
 Keep Learning Suite's `last_first_netid_...` filenames — the de-identification step parses them.
 
+**Canvas.** `grade 01_head` pulls the submissions itself, and `pull 01_head` pulls without grading, so there is nothing to download by hand. They land in the same shape, under the same names:
+
+```
+~/grading/ce544/2027-winter/01_head/
+├── submissions1/
+│   ├── Last_First_netid_theirfilename.xlsx
+│   └── ...
+└── canvas.json       each file's Canvas user id, for sending grades back (mode 600)
+```
+
+The pull takes each student's latest attempt and every file in it, and dates each file to its Canvas submission time.
+
 ### 2. Ask Claude Code to grade it
 
 From the instructor repo:
@@ -142,7 +192,7 @@ From the instructor repo:
 grade 01_head
 ```
 
-The skill runs the workflow: sync check, assemble the assignment and key, de-identify, grade, generate feedback, restore names. It stops there, with everything ready for you to read — the upload files come after your review, in step 4.
+The skill runs the workflow: sync check, pull from Canvas (Canvas courses only), assemble the assignment and key, de-identify, grade, generate feedback, restore names. It stops there, with everything ready for you to read. Grades go out after your review, in step 4.
 
 ### 3. Review the feedback
 
@@ -156,7 +206,7 @@ Read the documents and fix the ones you disagree with. **Edit the document, not 
 
 Each document opens with the score table, then has a short section for each item where the student lost points. Items with full credit get no section, unless the grader found a better habit worth suggesting; those appear last, under Other Feedback, and cost no points.
 
-### 4. Build the upload artifacts
+### 4. Send the grades
 
 Ask for it the same way you asked for the grading:
 
@@ -166,26 +216,46 @@ finalize 01_head
 
 "sync the scores", "I'm done reviewing", "I bumped a couple of scores" all mean the same thing. Nothing is regraded — the documents on disk are already the answer, and this reads them.
 
-It writes their scores into `scores.xlsx`, recalculates, and produces:
+It writes their scores into `scores.xlsx` and recalculates. For a Learning Suite course it then produces:
 
 ```
 ├── feedback1/batch_upload.zip   ← upload this, not the files individually
 └── scores_upload1.csv           ← Net ID + score, for the Grades import
 ```
 
+For a Canvas course it lists what it would send instead: each student's score, what Canvas holds now, whether Canvas marked the work late, and the feedback document to attach. Nothing goes to Canvas until you say yes. Then it enters each score and attaches each document to the student's submission as a comment.
+
+Scores go up raw, because Canvas applies the course's late policy itself (CE 544: 10% a day, down to 50%); a late submission shows its deduction in the Canvas gradebook rather than in the feedback document. Grades stay hidden from students until you post them in Canvas.
+
+Nothing is sent to a student listed under any of these:
+
+| | |
+|---|---|
+| **CHANGED IN CANVAS** | a score changed in Canvas since the last send, or entered there directly; it is replaced only if you name the student and say so |
+| **RESUBMITTED SINCE THE PULL** | a newer attempt than the one graded; `grade 01_head` again picks it up |
+| **UP TO DATE** | Canvas already has this score and this document |
+| **BLOCKED** | the document disagrees with itself or with `scores.xlsx`; fix it and finalize again |
+| **CANNOT SEND** | the assignment posts grades automatically (see [setup step 5](#5-canvas-courses-a-token-and-a-canvas-block)) |
+
 It also catches the mistake that is easy to make by hand: bumping a score in the summary table and leaving the section line or the totals showing the old number. It reports those rather than guessing, and can recompute the totals from the table if you ask. To see what it found before anything is written, say `check 01_head` instead.
 
-Both artifacts are snapshots. Edit another document afterward and say `finalize 01_head` again.
+The Learning Suite artifacts are snapshots, and so is a Canvas send. Edit another document afterward and say `finalize 01_head` again; on Canvas, only what changed goes out again.
 
 By hand, if you'd rather:
 
 ```bash
+# Learning Suite
 python "$GT/sync_scores.py" ~/grading/ce544/2026-fall/01_head --apply --zip
+
+# Canvas
+python "$GT/sync_scores.py" ~/grading/ce544/2027-winter/01_head --apply
+python "$GT/canvas_push.py" ~/grading/ce544/2027-winter/01_head           # lists, sends nothing
+python "$GT/canvas_push.py" ~/grading/ce544/2027-winter/01_head --send
 ```
 
 ### 5. Late work and resubmissions
 
-Download again into the next numbered folder:
+On Learning Suite, download again into the next numbered folder:
 
 ```
 ~/grading/ce544/2026-fall/01_head/
@@ -193,7 +263,9 @@ Download again into the next numbered folder:
 └── submissions2/       the second one
 ```
 
-Then ask for the same thing — `grade 01_head`. Learning Suite hands back the whole class on every download, so the grader hashes each file against the previous round and only grades what actually changed. Students keep the codes their existing feedback carries, and the report tells you exactly what happened:
+Then ask for the same thing — `grade 01_head`. On Canvas, that request is the whole step: it pulls again into `submissions2/`, and if nothing has changed on Canvas since the last pull it says so and makes no folder.
+
+Either way the new folder holds the whole class, so the grader hashes each file against the previous round and only grades what actually changed. Students keep the codes their existing feedback carries, and the report tells you exactly what happened:
 
 | | |
 |---|---|
@@ -205,7 +277,7 @@ Then ask for the same thing — `grade 01_head`. Learning Suite hands back the w
 | **RENAMED** | same content under a new filename, nothing to regrade |
 | **MISSING** | graded earlier, not in this download; nothing deleted |
 
-Submission timestamps come with it, so you can see what was late. No penalty is applied automatically — that policy lives in your `grading_guide.md` and stays your call.
+Submission timestamps come with it, so you can see what was late. On Learning Suite no penalty is applied automatically — that policy lives in your `grading_guide.md` and stays your call. On Canvas the course's late policy applies when the score is entered, so the grader never deducts for lateness.
 
 Nothing is ever deleted, and the first download stays exactly as it was.
 
@@ -233,7 +305,7 @@ RESUBMITTED (1) — already graded and uploaded; these scores are changing
   Ngo, Alex (ango7)      was 1 Sep 10:02, now 7 Sep 22:40
 ```
 
-Then `finalize 01_head` again. It reconciles `scores.xlsx` across every round — one workbook for the class, with a **Round** column recording who was graded when — and writes upload artifacts covering only the round just graded. Importing all forty students again would overwrite any score you had adjusted inside Learning Suite since the first upload; `--round all` exports everyone if you ever want that.
+Then `finalize 01_head` again. It reconciles `scores.xlsx` across every round — one workbook for the class, with a **Round** column recording who was graded when — and writes upload artifacts, or sends to Canvas, covering only the round just graded. Importing all forty students again would overwrite any score you had adjusted inside Learning Suite since the first upload; `--round all` exports everyone if you ever want that. Canvas has the same `--round all`, and still leaves alone any score changed there.
 
 If someone resubmitted, they have a document in both folders. The later one is the score, and `sync_scores.py` says so rather than letting the stale one count.
 
@@ -260,7 +332,25 @@ python "$GT/preflight_sync.py" ~/python_projects/ce544_private --pull
 
 Checks the tooling, then the repos, and stops on either.
 
-Dependencies come first and are reported together, with the install command and the phase each would have broken. Then both repos must be clean and current, or you risk grading against a stale rubric. `--pull` fast-forwards a repo that is clean and merely behind; it **stops** rather than pulling if a repo has uncommitted changes or has diverged — those need you.
+Dependencies come first and are reported together, with the install command and the phase each would have broken. A Canvas course also needs `requests`, PyYAML, and the token file at mode 600; the check looks at the file's mode and never reads the token. Then both repos must be clean and current, or you risk grading against a stale rubric. `--pull` fast-forwards a repo that is clean and merely behind; it **stops** rather than pulling if a repo has uncommitted changes or has diverged — those need you.
+
+### Phase 0.5 — Pull from Canvas
+
+```bash
+python "$GT/canvas_pull.py" ~/python_projects/ce544_private 01_head
+```
+
+Canvas courses only. It finds the Canvas assignment for the key, then downloads every student's latest attempt into the next `submissions<N>/` under `<grading_workspace>/<term>/01_head/`. `--term` or `--dest` puts it somewhere else, and `--assignment-id` skips the lookup.
+
+It builds the folder a Learning Suite download would have produced, so `mask` needs nothing new.
+
+- **The whole class, every time.** A file pulled before is copied from the earlier folder rather than downloaded again, so `mask` hashes identical bytes and reports the student UNCHANGED.
+- **Resubmissions keep their name.** Canvas can rename a re-uploaded file to avoid a clash with the student's earlier copy (`hw1.xlsx` becomes `hw1-1.xlsx`). The pull gives it back the name from the earlier round, so `mask` sees new bytes under the old name and reports RESUBMITTED, where it would otherwise report a new file beside a missing one. A `-1` on a name the student had not used before is left alone.
+- **No empty rounds.** Nothing new on Canvas means no new folder. If the newest folder has been neither masked nor graded, a pull replaces it rather than starting another round, as long as it holds only files a pull put there.
+
+It reports counts — new, resubmitted, unchanged, late, no submission — and no names, since nothing is masked yet. A student whose `login_id` gives no usable NetID gets their Canvas user id in the NetID slot, and the report lists them by that id.
+
+`canvas.json` records, for every pull, each file's Canvas user id, attachment id and attempt, and then every score and document sent. It holds names and NetIDs, so like `roster.json` it stays in the workspace at mode 600.
 
 ### Phase 1 — Resolve the assignment
 
@@ -345,6 +435,16 @@ This is what `finalize 01_head` runs. The feedback document is the score of reco
 
 The CSV and zip cover only the round just graded. It refuses to build the zip while any document contradicts itself, since that zip is what reaches students.
 
+On Canvas, finalize runs it without `--zip` and then:
+
+```bash
+python "$GT/canvas_push.py" ~/grading/ce544/2027-winter/01_head [--send]
+```
+
+Without `--send` it lists and sends nothing. With it, for each student the round graded, it uploads the feedback document, then enters the score and attaches the document as a submission comment in one request, and records what it sent in `canvas.json`. The next push compares against that record: a score in Canvas that differs from the last one sent was changed there, and stays unless `--overwrite <netid>` names the student. It reads the score from the document, checks it against `scores.xlsx`, and refuses a student where the two differ, since that means a document was edited after finalize.
+
+It never posts grades, and refuses to send at all while the assignment posts grades automatically.
+
 ### Phase 7 — Debrief
 
 ```bash
@@ -408,7 +508,8 @@ Tier 3 is deliberately not per-course: CCE 270 and CE 544 both assign Python, an
 ## Rules That Do Not Bend
 
 - **Student submissions and feedback never go in a git repo.** They are FERPA-protected education records and live only in the grading workspace.
-- **`roster.json` is never shared or committed.** It maps codes back to real students; it is the one file that re-identifies everything.
+- **`roster.json` is never shared or committed.** It maps codes back to real students; it is the one file that re-identifies everything. `canvas.json` ties the same students to their Canvas ids and gets the same care.
+- **The Canvas token stays in `~/.config/canvas/token`.** Not in a repo, a URL, a script, or a message.
 - **Never pull over uncommitted changes.** The preflight refuses to, and so should you.
 
 ---
@@ -442,6 +543,7 @@ The cost is that the install cache is then named by SHA rather than by version. 
 2. Add `course.yml` naming both repos and the grading workspace.
 3. Add `grading_guide.md` for course-level policy.
 4. Put keys under `keys/<unit>/<topic>/`, each with a `key.md` pointing at its assignment.
+5. If students submit on Canvas, add `lms: canvas` and a `canvas:` block to `course.yml` ([setup step 5](#5-canvas-courses-a-token-and-a-canvas-block)), and set the course to post grades manually.
 
 ---
 
@@ -450,6 +552,7 @@ The cost is that the install cache is then named by SHA rather than by version. 
 ```
 grading_tools/
 ├── .claude-plugin/marketplace.json     catalog
+├── tests/                              python -m pytest tests  (Canvas, against a fake API)
 └── plugins/grading/
     ├── .claude-plugin/plugin.json
     └── skills/homework-grader/
@@ -469,5 +572,8 @@ grading_tools/
             ├── debrief_stats.py         per-item stats for the debrief
             ├── recalc.py                recalculate xlsx formulas
             ├── package_feedback.py      build feedbackN/batch_upload.zip
-            └── export_upload_csv.py     build scores_uploadN.csv
+            ├── export_upload_csv.py     build scores_uploadN.csv
+            ├── canvas_pull.py           Canvas -> submissionsN/
+            ├── canvas_push.py           scores + feedback -> Canvas
+            └── canvas_api.py            Canvas client, course.yml canvas block
 ```

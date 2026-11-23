@@ -430,6 +430,7 @@ def main():
                     raise CanvasError(f"cannot make a term folder from the Canvas term "
                                       f"{name!r}; pass --term (e.g. 2027-winter)")
             adir = cfg["workspace"] / term / args.assignment_key
+        print(f"Assignment folder: {adir}")
         return report(pull(cv, cfg, assignment, adir))
     except CanvasError as exc:
         print(f"error: {exc}", file=sys.stderr)
