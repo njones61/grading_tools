@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Verify every tool the grading pipeline shells out to is actually installed.
 
-    check_deps.py [--workspace DIR] [--json]
+    check_deps.py [--workspace DIR] [--lms canvas] [--token-file FILE] [--json]
 
 Run before anything else. Each of these is discovered late otherwise, and
 some of them fail in ways that look like success:
@@ -15,6 +15,11 @@ some of them fail in ways that look like success:
     That surfaces at Phase 5, after the whole class has been graded.
   * Without the docx npm package, no feedback document can be written at all.
     That surfaces at Phase 4, after the whole class has been graded.
+
+A course whose course.yml says `lms: canvas` also needs requests and PyYAML,
+which canvas_pull.py and canvas_push.py import, and an API token only its
+owner can read. The token's contents are never read here; its presence and
+mode are.
 
 The cost of checking is a second. The cost of not checking is a batch graded
 twice, or a name reaching the grader that was supposed to have been removed.
@@ -40,6 +45,14 @@ PYTHON_DEPS = [
     ("pypdf", "pypdf", "measures PDF pages, so a scan can be told from a born-digital file", "2.5"),
 ]
 
+# Only for a course on Canvas: the pull and push scripts talk to its API.
+CANVAS_DEPS = [
+    ("requests", "requests", "talks to the Canvas API", "0.5"),
+    ("yaml", "pyyaml", "reads the canvas block of course.yml", "0.5"),
+]
+
+DEFAULT_TOKEN_FILE = "~/.config/canvas/token"
+
 BINARY_DEPS = [
     (["pdftoppm"], "brew install poppler",
      "rasterizes PDF pages for redaction", "2.5"),
@@ -48,11 +61,26 @@ BINARY_DEPS = [
 ]
 
 
-def check(workspace=None):
+def check_canvas_token(token_file=None):
+    """A problem with the Canvas token file, or None. Never reads the token."""
+    p = Path(token_file or DEFAULT_TOKEN_FILE).expanduser()
+    make = (f"in Canvas: Account > Settings > New Access Token, then "
+            f"mkdir -p {p.parent} && pbpaste > {p} && chmod 600 {p}")
+    if not p.is_file():
+        return {"name": "Canvas API token", "install": make, "phase": "0.5",
+                "why": f"pulls submissions and pushes grades; nothing at {p}"}
+    if p.stat().st_mode & 0o077:
+        return {"name": "Canvas API token", "install": f"chmod 600 {p}", "phase": "0.5",
+                "why": f"{p} is readable by other accounts on this machine"}
+    return None
+
+
+def check(workspace=None, lms=None, token_file=None):
     """Everything missing, as [{name, install, why, phase}]."""
     missing = []
 
-    for mod, pip_name, why, phase in PYTHON_DEPS:
+    deps = PYTHON_DEPS + (CANVAS_DEPS if str(lms or "").lower() == "canvas" else [])
+    for mod, pip_name, why, phase in deps:
         try:
             importlib.import_module(mod)
         except ImportError:
@@ -101,6 +129,10 @@ def check(workspace=None):
                 missing.append({"name": "docx (npm)",
                                 "install": f"cd {ws} && npm install docx",
                                 "why": f"could not be checked: {exc}", "phase": "4"})
+    if str(lms or "").lower() == "canvas":
+        problem = check_canvas_token(token_file)
+        if problem:
+            missing.append(problem)
     return missing
 
 
@@ -121,10 +153,12 @@ def main():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--workspace", type=Path,
                     help="grading workspace, to check the docx npm package")
+    ap.add_argument("--lms", help="'canvas' also checks what the Canvas scripts need")
+    ap.add_argument("--token-file", help=f"Canvas API token (default: {DEFAULT_TOKEN_FILE})")
     ap.add_argument("--json", action="store_true", dest="as_json")
     args = ap.parse_args()
 
-    missing = check(args.workspace)
+    missing = check(args.workspace, args.lms, args.token_file)
     if args.as_json:
         print(json.dumps({"missing": missing, "ready": not missing}, indent=2))
     else:

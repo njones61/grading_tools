@@ -208,7 +208,9 @@ def main():
         try:
             sys.path.insert(0, str(Path(__file__).resolve().parent))
             from check_deps import check as check_tools, report as report_tools
-            missing = check_tools(course.get("grading_workspace"))
+            canvas = course.get("canvas") if isinstance(course.get("canvas"), dict) else {}
+            missing = check_tools(course.get("grading_workspace"), course.get("lms"),
+                                  canvas.get("token_file"))
         except ImportError:
             missing = [{"name": "check_deps.py", "install": "reinstall the plugin",
                         "why": "could not be imported", "phase": "0"}]
